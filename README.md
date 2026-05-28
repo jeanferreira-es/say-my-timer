@@ -1,32 +1,32 @@
 # SayMyTimer
 
-Um app mobile feito com Expo + React Native para controlar rodadas cronometradas, chamar o proximo participante, tocar alarmes e manter a pontuacao dos times no mesmo lugar. A ideia e simples: menos confusao durante a brincadeira, mais foco no jogo.
+Um app mobile feito com Expo + React Native para controlar rodadas cronometradas, chamar o proximo participante, tocar alarmes e manter a pontuação dos times no mesmo lugar. A ideia e simples: menos confusao durante a brincadeira, mais foco no jogo.
 
-Ele foi pensado para partidas em grupo, dinamicas presenciais, jogos de perguntas, desafios por equipes ou qualquer situacao em que alguem sempre fala "calma, de quem e a vez mesmo?".
+Ele foi pensado para partidas em grupo, dinamicas presenciais, jogos de perguntas, desafios por equipes ou qualquer situação em que alguem sempre fala "calma, de quem e a vez mesmo?".
 
 ## O que o app faz
 
-- Timer principal de 30 segundos.
-- Timer secundario configuravel, usado como preparacao antes de iniciar o timer principal.
+- Temporizador principal de 30 segundos.
+- Temporizador secundario configuravel, usado como preparação antes de iniciar o temporizador principal.
 - Chamada automatica do participante atual com base nos times cadastrados.
 - Alternancia entre jogadores de times diferentes para deixar a ordem mais equilibrada.
-- Alarme sonoro ao fim do timer principal.
-- Som de inicio quando o timer secundario termina e dispara o timer de 30 segundos.
+- Alarme sonoro ao fim do temporizador principal.
+- Som de inicio quando o temporizador secundario termina e dispara o temporizador de 30 segundos.
 - Tela para escolher e testar sons de alarme.
 - Placar por times, com linhas fixas para rodadas e total.
-- Cadastro, remocao e reordenacao de times.
-- Cadastro, remocao e reordenacao de participantes por time.
+- Cadastro, remoção e reordenação de times.
+- Cadastro, remoção e reordenação de participantes por time.
 - Tema claro/escuro controlado pelo contexto global do app.
-- Navegacao por tabs com Expo Router.
+- Navegação por tabs com Expo Router.
 
 ## Como a experiencia funciona
 
-Na tela principal, o app mostra quem esta na vez e dois timers:
+Na tela principal, o app mostra quem esta na vez e dois temporizadores:
 
-- O timer grande tem 30 segundos e representa a rodada principal.
-- O timer pequeno e o tempo de preparacao. Ele pode ser editado na tela de configuracao de tempo.
+- O temporizador grande tem 30 segundos e representa a rodada principal.
+- O temporizador pequeno e o tempo de preparação. Ele pode ser editado na tela de configuração de tempo.
 
-Quando o timer pequeno termina, o app toca um som de inicio e ja dispara o timer de 30 segundos. Quando o timer principal termina, o app toca o alarme selecionado e avanca para o proximo participante.
+Quando o temporizador pequeno termina, o app toca um som de inicio e ja dispara o temporizador de 30 segundos. Quando o temporizador principal termina, o app toca o alarme selecionado e avanca para o proximo participante.
 
 A ordem dos participantes e montada intercalando os times. Por exemplo:
 
@@ -42,33 +42,33 @@ Esse comportamento evita que um time jogue todos os participantes de uma vez enq
 
 ## Telas principais
 
-### Timer
+### Temporizador
 
 Arquivo principal: `app/(tabs)/index.tsx`
 
 E o centro do app. Ela controla:
 
-- os dois timers;
-- animacao circular de progresso;
+- os dois temporizadores;
+- animação circular de progresso;
 - som de inicio;
 - som de alarme;
-- vibracao de fallback se o audio falhar;
+- vibração de fallback se o audio falhar;
 - participante atual;
 - troca de tema;
 - acesso rapido ao placar e aos alarmes.
 
 Toques uteis:
 
-- Toque em um timer para iniciar/pausar.
-- Pressione e segure um timer para resetar.
+- Toque em um temporizador para iniciar/pausar.
+- Pressione e segure um temporizador para resetar.
 - Use o botao de refresh para reiniciar o fluxo da rodada.
-- Use o botao de lapis ao lado do timer menor para editar o tempo de preparacao.
+- Use o botao de lapis ao lado do temporizador menor para editar o tempo de preparação.
 
-### Pontuacoes
+### Pontuações
 
 Arquivo principal: `screens/ScoresScreen.tsx`
 
-Aqui moram os times, os participantes e a tabela de pontuacao. Cada time vira uma coluna na tabela. As linhas atuais sao:
+Aqui moram os times, os participantes e a tabela de pontuação. Cada time vira uma coluna na tabela. As linhas atuais sao:
 
 - `R1`
 - `R2`
@@ -85,33 +85,33 @@ Tambem da para:
 - remover participantes;
 - reordenar participantes arrastando.
 
-Essa tela usa `react-native-draggable-flatlist` para permitir ordenacao manual dos participantes.
+Essa tela usa `react-native-draggable-flatlist` para permitir ordenação manual dos participantes.
 
 ### Som do alarme
 
 Arquivo principal: `screens/AlarmSettingsScreen.tsx`
 
-Permite escolher qual audio sera tocado ao fim do timer principal. Os sons estao registrados em `config/alarms.ts` e apontam para arquivos `.wav` dentro de `assets/audio`.
+Permite escolher qual audio sera tocado ao fim do temporizador principal. Os sons estao registrados em `config/alarms.ts` e apontam para arquivos `.wav` dentro de `assets/audio`.
 
-Cada opcao pode ser testada antes de selecionar. O app tambem limpa o preview ao sair da tela para evitar audio perdido tocando no fundo.
+Cada opção pode ser testada antes de selecionar. O app tambem limpa o preview ao sair da tela para evitar audio perdido tocando no fundo.
 
-### Tempo de preparacao
+### Tempo de preparação
 
 Arquivo principal: `screens/TimeEditorScreen.tsx`
 
-Permite configurar o timer secundario. Hoje ele aceita valores entre 1 e 999 segundos.
+Permite configurar o temporizador secundario. Hoje ele aceita valores entre 1 e 999 segundos.
 
 ### Sortear
 
 Arquivo principal: `screens/DrawScreen.tsx`
 
-Tela inicial para uma funcionalidade de sorteio/eliminacao. Por enquanto ela apresenta a instrucao da dinamica, mas ainda nao tem a interacao completa implementada.
+Tela inicial para uma funcionalidade de sorteio/eliminação. Por enquanto ela apresenta a instrução da dinamica, mas ainda nao tem a interação completa implementada.
 
 ### Segunda tab
 
 Arquivo principal: `app/(tabs)/two.tsx`
 
-Ainda esta com conteudo padrao de template. A navegacao ja existe, entao e um bom lugar para evoluir a tela de times, sorteio ou alguma area secundaria do app.
+Ainda esta com conteudo padrao de template. A navegação ja existe, entao e um bom lugar para evoluir a tela de times, sorteio ou alguma area secundaria do app.
 
 ## Estrutura do projeto
 
@@ -121,10 +121,10 @@ say-my-timer/
     _layout.tsx              # Provider global, fontes, Stack e rotas principais
     (tabs)/
       _layout.tsx            # Layout da tab bar
-      index.tsx              # Tela principal do timer
+      index.tsx              # Tela principal do temporizador
       two.tsx                # Segunda tab, ainda baseada no template
-    alarm.tsx                # Rota para configuracao de alarme
-    edit-time.tsx            # Rota para editar timer secundario
+    alarm.tsx                # Rota para configuração de alarme
+    edit-time.tsx            # Rota para editar temporizador secundario
     score.tsx                # Rota para placar
   assets/
     audio/                   # Sons de inicio e alarmes
@@ -150,13 +150,13 @@ say-my-timer/
 O arquivo `context/AppContext.tsx` centraliza o estado compartilhado. Ele guarda:
 
 - contador simples;
-- tabela de pontuacoes;
+- tabela de pontuações;
 - colunas/times;
 - participantes por time;
 - tema atual;
 - cores derivadas do tema;
 - alarme selecionado;
-- tempo do timer secundario.
+- tempo do temporizador secundario.
 
 O hook usado pelas telas e:
 
@@ -194,9 +194,9 @@ const { colors } = useApp();
 E aplicar:
 
 ```tsx
-backgroundColor: colors.background
-color: colors.text
-borderColor: colors.border
+backgroundColor: colors.background;
+color: colors.text;
+borderColor: colors.border;
 ```
 
 Simples, previsivel e sem precisar cacar `Colors.light` espalhado pelo app inteiro.
@@ -207,11 +207,11 @@ O app usa `expo-audio`.
 
 Arquivos importantes:
 
-- `assets/audio/start.wav`: som tocado quando o timer de preparacao termina.
-- `assets/audio/alarm2.wav` ate `alarm12.wav`: opcoes de alarme.
+- `assets/audio/start.wav`: som tocado quando o tempo de preparação termina.
+- `assets/audio/alarm2.wav` ate `alarm12.wav`: opções de alarme.
 - `config/alarms.ts`: mapa de ids para arquivos de audio.
 
-O timer tenta tocar o alarme selecionado. Se algo der errado com o audio, ele usa vibracao como fallback.
+O temporizador tenta tocar o alarme selecionado. Se algo der errado com o audio, ele usa vibração como fallback.
 
 ## Tecnologias
 
@@ -278,7 +278,7 @@ npm run web
 - Para Android: Android Studio ou um dispositivo/emulador configurado.
 - Para iOS: macOS com Xcode, quando for rodar nativamente.
 
-## Observacoes de desenvolvimento
+## Observações de desenvolvimento
 
 - O app usa Expo Router, entao novas rotas entram pela pasta `app/`.
 - Telas mais completas estao na pasta `screens/` e sao expostas por arquivos de rota em `app/`.
@@ -295,10 +295,9 @@ npm run web
 - Transformar a segunda tab em uma tela util do app.
 - Calcular automaticamente a linha `Total` do placar.
 - Melhorar feedback visual quando o alarme esta tocando.
-- Adicionar testes para as funcoes de ordenacao de times e participantes.
-- Criar um fluxo de onboarding curtinho para explicar a logica dos timers.
+- Adicionar testes para as funções de ordenação de times e participantes.
+- Criar um fluxo de onboarding curtinho para explicar a logica dos temporizadores.
 
 ## Sobre o nome
 
 SayMyTimer tem uma vibe de "me chama quando for minha vez". E basicamente isso mesmo: o app segura o tempo, chama o jogador, toca o alarme e deixa a rodada andar sem precisar de uma pessoa virando fiscal do cronometro.
-
