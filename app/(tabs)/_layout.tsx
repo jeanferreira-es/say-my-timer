@@ -1,17 +1,19 @@
-import Colors from "@/constants/Colors";
+import { useApp } from "@/context/AppContext";
 import { FontAwesome6, Ionicons } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
 import React from "react";
 import { Dimensions, Platform, View } from "react-native";
 
 export default function TabLayout() {
+  const { colors } = useApp();
+
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
         tabBarShowLabel: false,
-        tabBarActiveTintColor: "#111827",
-        tabBarInactiveTintColor: "#9ca3af",
+        tabBarActiveTintColor: colors.text,
+        tabBarInactiveTintColor: colors.textTertiary,
         animation: "shift",
         tabBarStyle: {
           position: "absolute",
@@ -21,7 +23,7 @@ export default function TabLayout() {
           height: 60,
           width: "50%",
           borderRadius: 30,
-          backgroundColor: Colors.light.BottomTabBg,
+          backgroundColor: colors.surface,
           shadowColor: "#000",
           shadowOffset: { width: 0, height: 8 },
           shadowOpacity: 0.08,
@@ -37,31 +39,30 @@ export default function TabLayout() {
           tabBarIcon: ({ focused, size }) => (
             <View
               style={{
-                width: 95,
+                width: 94,
                 height: 52,
                 marginTop: 20,
                 borderRadius: 30,
                 alignItems: "center",
                 justifyContent: "center",
-                backgroundColor: focused ? "#111827" : "#e5e7eb",
+                backgroundColor: focused ? colors.primary : colors.card,
               }}
             >
               <Ionicons
                 name="game-controller-outline"
                 size={size + 2}
-                color={
-                  focused ? "white" : Colors.light.BottomTabItemSelected + "60"
-                }
+                color={focused ? colors.background : colors.textTertiary}
               />
             </View>
           ),
         }}
       />
+
       <Tabs.Screen
         name="two"
         options={{
           title: "Teams",
-          tabBarIcon: ({ color, size, focused }) => (
+          tabBarIcon: ({ focused, size }) => (
             <View
               style={{
                 width: 95,
@@ -70,15 +71,13 @@ export default function TabLayout() {
                 borderRadius: 30,
                 alignItems: "center",
                 justifyContent: "center",
-                backgroundColor: focused ? "#111827" : "#e5e7eb",
+                backgroundColor: focused ? colors.primary : colors.card,
               }}
             >
               <FontAwesome6
-                name={"chess-knight"}
+                name="chess-knight"
                 size={size}
-                color={
-                  focused ? "white" : Colors.light.BottomTabItemSelected + "60"
-                }
+                color={focused ? colors.background : colors.textTertiary}
               />
             </View>
           ),
