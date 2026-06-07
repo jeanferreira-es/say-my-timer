@@ -42,10 +42,16 @@ export interface AppContextValue {
   participantsByTeam: Record<string, string[]>;
   updateScore: (rowId: string, column: string, value: string) => void;
   addScoreColumn: (name: string) => boolean;
+  renameScoreColumn: (teamName: string, nextName: string) => boolean;
   removeScoreColumn: (teamName: string) => void;
   reorderScoreColumns: (newOrder: string[]) => void;
   moveTeam: (teamIndex: number, direction: "left" | "right") => void;
   addParticipantToTeam: (teamName: string, participantName: string) => boolean;
+  updateParticipant: (
+    teamName: string,
+    participantIndex: number,
+    nextName: string,
+  ) => boolean;
   removeParticipant: (teamName: string, participantName: string) => void;
   reorderParticipants: (teamName: string, newOrder: string[]) => void;
   themeMode: ThemeMode;
@@ -195,6 +201,53 @@ export function AppProvider({ children }: AppProviderProps) {
     );
   }, []);
 
+  const renameScoreColumn = useCallback(
+    (teamName: string, nextName: string) => {
+      const trimmed = teamName.trim();
+      const next = nextName.trim();
+      if (!trimmed || !next) return false;
+      if (trimmed === next) return true;
+
+      const alreadyExists = scoreColumns.some(
+        (column) =>
+          column !== trimmed && column.toLowerCase() === next.toLowerCase(),
+      );
+
+      if (!scoreColumns.includes(trimmed) || alreadyExists) {
+        return false;
+      }
+
+      setScoreColumns((prev) =>
+        prev.map((column) => (column === trimmed ? next : column)),
+      );
+      setParticipantsByTeam((prev) => {
+        const { [trimmed]: currentParticipants = [], ...rest } = prev;
+        return {
+          ...rest,
+          [next]: currentParticipants,
+        };
+      });
+      setScores((prev) =>
+        prev.map((row) => {
+          const { [trimmed]: currentScore, ...rest } = row.scores;
+          return {
+            ...row,
+            scores:
+              currentScore === undefined
+                ? rest
+                : {
+                    ...rest,
+                    [next]: currentScore,
+                  },
+          };
+        }),
+      );
+
+      return true;
+    },
+    [scoreColumns],
+  );
+
   const reorderScoreColumns = useCallback((newOrder: string[]) => {
     if (!newOrder.length) return;
     setScoreColumns(() => [...newOrder]);
@@ -252,6 +305,49 @@ export function AppProvider({ children }: AppProviderProps) {
     [],
   );
 
+  const updateParticipant = useCallback(
+    (teamName: string, participantIndex: number, nextName: string) => {
+      const trimmed = teamName.trim();
+      const next = nextName.trim();
+      const participants = participantsByTeam[trimmed] ?? [];
+      const currentParticipant = participants[participantIndex];
+
+      if (!trimmed || !next || currentParticipant === undefined) {
+        return false;
+      }
+
+      if (currentParticipant === next) {
+        return true;
+      }
+
+      const alreadyExists = participants.some(
+        (participant, index) =>
+          index !== participantIndex &&
+          participant.toLowerCase() === next.toLowerCase(),
+      );
+
+      if (alreadyExists) {
+        return false;
+      }
+
+      setParticipantsByTeam((prev) => {
+        const current = prev[trimmed] ?? [];
+        if (current[participantIndex] === undefined) return prev;
+
+        const nextParticipants = [...current];
+        nextParticipants[participantIndex] = next;
+
+        return {
+          ...prev,
+          [trimmed]: nextParticipants,
+        };
+      });
+
+      return true;
+    },
+    [participantsByTeam],
+  );
+
   const removeParticipant = useCallback(
     (teamName: string, participantName: string) => {
       const trimmed = teamName.trim();
@@ -285,10 +381,12 @@ export function AppProvider({ children }: AppProviderProps) {
       participantsByTeam,
       updateScore,
       addScoreColumn,
+      renameScoreColumn,
       removeScoreColumn,
       reorderScoreColumns,
       moveTeam,
       addParticipantToTeam,
+      updateParticipant,
       removeParticipant,
       reorderParticipants,
       themeMode,
@@ -308,10 +406,12 @@ export function AppProvider({ children }: AppProviderProps) {
       participantsByTeam,
       updateScore,
       addScoreColumn,
+      renameScoreColumn,
       removeScoreColumn,
       reorderScoreColumns,
       moveTeam,
       addParticipantToTeam,
+      updateParticipant,
       removeParticipant,
       reorderParticipants,
       themeMode,
