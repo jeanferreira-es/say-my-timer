@@ -20,6 +20,9 @@ export default function TabLayout() {
         tabBarActiveTintColor: colors.text,
         tabBarInactiveTintColor: colors.textTertiary,
         animation: "shift",
+        sceneStyle: {
+          backgroundColor: colors.background,
+        },
         tabBarStyle: {
           position: "absolute",
           marginHorizontal: 20,

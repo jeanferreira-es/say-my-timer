@@ -416,6 +416,9 @@ export default function ScoresScreen() {
                             reorderParticipants(team, data)
                           }
                           style={styles.participantsListScroll}
+                          scrollEnabled
+                          nestedScrollEnabled
+                          showsVerticalScrollIndicator={false}
                           renderItem={({
                             item: participant,
                             drag: dragParticipant,
@@ -665,7 +668,7 @@ const styles = StyleSheet.create({
     minHeight: 160,
   },
   participantsListScroll: {
-    maxHeight: 120,
+    maxHeight: 160,
   },
   teamCardBase: {
     borderWidth: 1,

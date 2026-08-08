@@ -1,6 +1,7 @@
 import { FontAwesome6, Ionicons } from "@expo/vector-icons";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  FlatList,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -44,12 +45,27 @@ function EmptyTeamsNotice({ colors }: ThemedComponentProps) {
 
 interface AddTeamCardProps extends ThemedComponentProps {
   onAddTeam: (teamName: string, players: string[]) => void;
+  teamCount: number;
 }
 
-function AddTeamCard({ colors, onAddTeam }: AddTeamCardProps) {
-  const [teamName, setTeamName] = useState("");
+function nextDefaultTeamName(teamCount: number): string {
+  return `Time ${String(teamCount + 1).padStart(2, "0")}`;
+}
+
+function AddTeamCard({ colors, onAddTeam, teamCount }: AddTeamCardProps) {
+  const defaultTeamName = nextDefaultTeamName(teamCount);
+  const [teamName, setTeamName] = useState(defaultTeamName);
   const [playerName, setPlayerName] = useState("");
   const [players, setPlayers] = useState<string[]>([]);
+  const previousDefaultRef = useRef(defaultTeamName);
+  const playerInputRef = useRef<TextInput>(null);
+
+  useEffect(() => {
+    setTeamName((current) =>
+      current === previousDefaultRef.current ? defaultTeamName : current,
+    );
+    previousDefaultRef.current = defaultTeamName;
+  }, [defaultTeamName]);
 
   const trimmedTeamName = teamName.trim();
   const trimmedPlayerName = playerName.trim();
@@ -62,12 +78,13 @@ function AddTeamCard({ colors, onAddTeam }: AddTeamCardProps) {
     if (alreadyExists) return;
     setPlayers((current) => [...current, trimmedPlayerName]);
     setPlayerName("");
+    playerInputRef.current?.focus();
   };
 
   const addTeam = () => {
     if (!trimmedTeamName) return;
     onAddTeam(trimmedTeamName, players);
-    setTeamName("");
+    setTeamName(nextDefaultTeamName(teamCount + 1));
     setPlayerName("");
     setPlayers([]);
   };
@@ -116,11 +133,13 @@ function AddTeamCard({ colors, onAddTeam }: AddTeamCardProps) {
 
         <View style={styles.playerInputRow}>
           <TextInput
+            ref={playerInputRef}
             value={playerName}
             onChangeText={setPlayerName}
             placeholder="Digite o nome do jogador"
             placeholderTextColor={colors.placeholder}
             returnKeyType="done"
+            submitBehavior="submit"
             onSubmitEditing={addDraftPlayer}
             style={[
               styles.playerInput,
@@ -176,7 +195,7 @@ interface TeamCardProps extends ThemedComponentProps {
   ) => boolean;
 }
 
-function TeamCard({
+function  TeamCard({
   colors,
   onAddParticipant,
   onMoveTeam,
@@ -194,6 +213,7 @@ function TeamCard({
   const [teamDraft, setTeamDraft] = useState(team);
   const [playerDrafts, setPlayerDrafts] = useState(participants);
   const [newPlayerName, setNewPlayerName] = useState("");
+  const newPlayerInputRef = useRef<TextInput>(null);
 
   const canMoveLeft = totalTeams > 1 && teamIndex > 0;
   const canMoveRight = totalTeams > 1 && teamIndex < totalTeams - 1;
@@ -225,6 +245,7 @@ function TeamCard({
     if (onAddParticipant(team, newPlayerName)) {
       setNewPlayerName("");
       setPlayerDrafts((current) => [...current, newPlayerName.trim()]);
+      newPlayerInputRef.current?.focus();
     }
   };
 
@@ -302,95 +323,107 @@ function TeamCard({
         </View>
       </View>
 
-      <View style={styles.participantsCardList}>
-        {participants.length === 0 && !editingPlayers ? (
-          <Text style={[styles.teamCardEmpty, { color: colors.textTertiary }]}>
-            Nenhum jogador adicionado
-          </Text>
-        ) : null}
-
-        {(editingPlayers ? playerDrafts : participants).map(
-          (participant, participantIndex) => (
-            <View key={`${team}-${participantIndex}`} style={styles.teamPlayerRow}>
-              <Ionicons
-                name="reorder-three"
-                size={18}
-                color={colors.textTertiary}
-              />
-              {editingPlayers ? (
-                <>
-                  <TextInput
-                    value={participant}
-                    onChangeText={(value) =>
-                      updatePlayerDraft(participantIndex, value)
-                    }
-                    placeholder="Nome do jogador"
-                    placeholderTextColor={colors.placeholder}
-                    returnKeyType="done"
-                    style={[
-                      styles.playerEditInput,
-                      {
-                        backgroundColor: colors.inputBg,
-                        color: colors.text,
-                      },
-                    ]}
+      <FlatList
+        data={editingPlayers ? playerDrafts : participants}
+        keyExtractor={(_participant, participantIndex) =>
+          `${team}-${participantIndex}`
+        }
+        style={styles.participantsCardList}
+        contentContainerStyle={styles.participantsCardListContent}
+        scrollEnabled
+        nestedScrollEnabled
+        showsVerticalScrollIndicator={false}
+        ListEmptyComponent={
+          !editingPlayers ? (
+            <Text
+              style={[styles.teamCardEmpty, { color: colors.textTertiary }]}
+            >
+              Nenhum jogador adicionado
+            </Text>
+          ) : null
+        }
+        renderItem={({ item: participant, index: participantIndex }) => (
+          <View style={styles.teamPlayerRow}>
+            <Ionicons
+              name="reorder-three"
+              size={18}
+              color={colors.textTertiary}
+            />
+            {editingPlayers ? (
+              <>
+                <TextInput
+                  value={participant}
+                  onChangeText={(value) =>
+                    updatePlayerDraft(participantIndex, value)
+                  }
+                  placeholder="Nome do jogador"
+                  placeholderTextColor={colors.placeholder}
+                  returnKeyType="done"
+                  style={[
+                    styles.playerEditInput,
+                    {
+                      backgroundColor: colors.inputBg,
+                      color: colors.text,
+                    },
+                  ]}
+                />
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    onRemoveParticipant(team, participant);
+                    setPlayerDrafts((current) =>
+                      current.filter((_, index) => index !== participantIndex),
+                    );
+                  }}
+                  style={styles.playerDeleteButton}
+                >
+                  <Ionicons
+                    name="close"
+                    size={16}
+                    color={colors.textTertiary}
                   />
-                  <TouchableOpacity
-                    activeOpacity={0.8}
-                    onPress={() => {
-                      onRemoveParticipant(team, participant);
-                      setPlayerDrafts((current) =>
-                        current.filter((_, index) => index !== participantIndex),
-                      );
-                    }}
-                    style={styles.playerDeleteButton}
-                  >
-                    <Ionicons
-                      name="close"
-                      size={16}
-                      color={colors.textTertiary}
-                    />
-                  </TouchableOpacity>
-                </>
-              ) : (
-                <>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <Text
+                  numberOfLines={1}
+                  style={[styles.teamPlayerName, { color: colors.text }]}
+                >
+                  {participant}
+                </Text>
+                <View
+                  style={[
+                    styles.playerInitials,
+                    { borderColor: colors.primary },
+                  ]}
+                >
                   <Text
-                    numberOfLines={1}
-                    style={[styles.teamPlayerName, { color: colors.text }]}
-                  >
-                    {participant}
-                  </Text>
-                  <View
                     style={[
-                      styles.playerInitials,
-                      { borderColor: colors.primary },
+                      styles.playerInitialsText,
+                      { color: colors.primary },
                     ]}
                   >
-                    <Text
-                      style={[
-                        styles.playerInitialsText,
-                        { color: colors.primary },
-                      ]}
-                    >
-                      {participant.slice(0, 2).toUpperCase()}
-                    </Text>
-                  </View>
-                </>
-              )}
-            </View>
-          ),
+                    {participant.slice(0, 2).toUpperCase()}
+                  </Text>
+                </View>
+              </>
+            )}
+          </View>
         )}
-      </View>
+      />
 
       {editingPlayers ? (
         <View style={styles.cardPlayerInputRow}>
           <TextInput
+            ref={newPlayerInputRef}
             value={newPlayerName}
             onChangeText={setNewPlayerName}
             onSubmitEditing={addPlayer}
             placeholder="Novo jogador"
             placeholderTextColor={colors.placeholder}
             returnKeyType="done"
+            submitBehavior="submit"
             style={[
               styles.cardPlayerInput,
               { backgroundColor: colors.inputBg, color: colors.text },
@@ -470,10 +503,21 @@ function TeamsPreview({
   participantsByTeam,
   teams,
 }: TeamsPreviewProps) {
+  const scrollRef = useRef<ScrollView>(null);
+  const previousTeamsCountRef = useRef(teams.length);
+
+  useEffect(() => {
+    if (teams.length > previousTeamsCountRef.current) {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    }
+    previousTeamsCountRef.current = teams.length;
+  }, [teams.length]);
+
   if (teams.length === 0) return null;
 
   return (
     <ScrollView
+      ref={scrollRef}
       horizontal
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.teamsPreview}
@@ -575,7 +619,11 @@ export default function TabTwoScreen() {
             )}
           </View>
 
-          <AddTeamCard colors={colors} onAddTeam={handleAddTeam} />
+          <AddTeamCard
+            colors={colors}
+            onAddTeam={handleAddTeam}
+            teamCount={scoreColumns.length}
+          />
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -684,8 +732,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   participantsCardList: {
-    gap: 8,
     marginTop: 16,
+    maxHeight: 140,
+  },
+  participantsCardListContent: {
+    gap: 8,
     minHeight: 86,
   },
   teamCardEmpty: {

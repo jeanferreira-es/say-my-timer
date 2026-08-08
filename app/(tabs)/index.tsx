@@ -199,10 +199,10 @@ const TimerCircle = forwardRef<TimerCircleRef, TimerCircleProps>(
     const horizontalMargin = 40;
     const maxLargeDimension = (width - horizontalMargin * 2) / 2;
     const baseDimension = isLarge
-      ? Math.min(width * 0.5, 200, maxLargeDimension)
+      ? Math.min(width * 0.45, 180, maxLargeDimension)
       : Math.min(width * 0.28, 110);
     const dimension = baseDimension;
-    const fontSize = isLarge ? dimension * 0.5 : dimension * 0.22;
+    const fontSize = isLarge ? dimension * 0.45 : dimension * 0.22;
     const strokeWidth = 6;
     const radius = dimension / 2 - strokeWidth / 2;
     const circumference = 2 * Math.PI * radius;
