@@ -4,6 +4,7 @@ import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "react-native-reanimated";
 
 export { ErrorBoundary } from "expo-router";
@@ -45,15 +46,18 @@ function ThemeStatusBar() {
 
 function RootLayoutNav() {
   return (
-    <AppProvider>
-      <ThemeStatusBar />
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="alarm" options={{ headerShown: false }} />
-        <Stack.Screen name="score" options={{ headerShown: false }} />
-        <Stack.Screen name="edit-time" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: "modal" }} />
-      </Stack>
-    </AppProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AppProvider>
+        <ThemeStatusBar />
+        <Stack>
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="alarm" options={{ headerShown: false }} />
+          <Stack.Screen name="score" options={{ headerShown: false }} />
+          <Stack.Screen name="draw" options={{ headerShown: false }} />
+          <Stack.Screen name="edit-time" options={{ headerShown: false }} />
+          <Stack.Screen name="modal" options={{ presentation: "modal" }} />
+        </Stack>
+      </AppProvider>
+    </GestureHandlerRootView>
   );
 }

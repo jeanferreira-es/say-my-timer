@@ -85,7 +85,6 @@ export default function ScoresScreen() {
     scoreColumns,
     participantsByTeam,
     updateScore,
-    addScoreColumn,
     removeScoreColumn,
     moveTeam,
     addParticipantToTeam,
@@ -93,7 +92,6 @@ export default function ScoresScreen() {
     reorderParticipants,
     colors,
   } = useApp();
-  const [teamName, setTeamName] = useState("");
   const [participantInputs, setParticipantInputs] = useState<
     Record<string, string>
   >({});
@@ -108,12 +106,6 @@ export default function ScoresScreen() {
       "ref.measureLayout must be called with a ref to a native component",
     ]);
   }, []);
-
-  const handleAddTeam = () => {
-    if (addScoreColumn(teamName)) {
-      setTeamName("");
-    }
-  };
 
   const handleParticipantInputChange = (team: string, value: string) => {
     setParticipantInputs((prev) => ({
@@ -250,28 +242,9 @@ export default function ScoresScreen() {
 
           {scoreColumns.length === 0 ? (
             <Text style={[themedStyles.emptyText, styles.emptyTextSpacing]}>
-              Adicione um time abaixo para criar a primeira coluna da tabela.
+              Cadastre um time na aba Times para começar a pontuar.
             </Text>
           ) : null}
-
-          <View style={styles.addTeamContainer}>
-            <TextInput
-              style={[themedStyles.input, styles.teamNameInput]}
-              value={teamName}
-              onChangeText={setTeamName}
-              placeholder="Nome do time"
-              placeholderTextColor={colors.placeholder}
-              returnKeyType="done"
-              onSubmitEditing={handleAddTeam}
-            />
-            <TouchableOpacity
-              style={themedStyles.addButton}
-              onPress={handleAddTeam}
-              activeOpacity={0.85}
-            >
-              <Text style={themedStyles.addButtonText}>Adicionar</Text>
-            </TouchableOpacity>
-          </View>
 
           <View style={styles.participantsSection}>
             <Text style={{ ...themedStyles.sectionTitle, marginLeft: 20 }}>
@@ -562,18 +535,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 8,
     minHeight: 36,
-  },
-  addTeamContainer: {
-    flexDirection: "row",
-    gap: 12,
-    paddingHorizontal: 20,
-    paddingBottom: 24,
-    alignItems: "center",
-  },
-  teamNameInput: {
-    flex: 1,
-    minHeight: 44,
-    paddingHorizontal: 12,
   },
   addButtonBase: {
     minHeight: 44,

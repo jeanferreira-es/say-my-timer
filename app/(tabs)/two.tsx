@@ -1,8 +1,9 @@
 import { FontAwesome6, Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  FlatList,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -11,6 +12,11 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import {
+  NestableDraggableFlatList,
+  NestableScrollContainer,
+  RenderItemParams,
+} from "react-native-draggable-flatlist";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { type ThemeColors, useApp } from "@/context/AppContext";
@@ -19,10 +25,15 @@ interface ThemedComponentProps {
   colors: ThemeColors;
 }
 
-function HeaderAction({ colors }: ThemedComponentProps) {
+interface HeaderActionProps extends ThemedComponentProps {
+  onPress: () => void;
+}
+
+function HeaderAction({ colors, onPress }: HeaderActionProps) {
   return (
     <TouchableOpacity
       activeOpacity={0.8}
+      onPress={onPress}
       style={[styles.headerAction, { backgroundColor: colors.surface }]}
     >
       <FontAwesome6 name="dice" size={30} color={colors.text} />
@@ -43,7 +54,30 @@ function EmptyTeamsNotice({ colors }: ThemedComponentProps) {
   );
 }
 
-interface AddTeamCardProps extends ThemedComponentProps {
+interface AddTeamTriggerProps extends ThemedComponentProps {
+  onPress: () => void;
+}
+
+function AddTeamTrigger({ colors, onPress }: AddTeamTriggerProps) {
+  return (
+    <View style={styles.addSection}>
+      <TouchableOpacity
+        onPress={onPress}
+        activeOpacity={0.85}
+        style={[styles.addTriggerButton, { backgroundColor: colors.primary }]}
+      >
+        <Ionicons name="add-circle-outline" size={20} color={colors.background} />
+        <Text style={[styles.addTriggerButtonText, { color: colors.background }]}>
+          Adicionar novo time
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+interface AddTeamModalProps extends ThemedComponentProps {
+  visible: boolean;
+  onClose: () => void;
   onAddTeam: (teamName: string, players: string[]) => void;
   teamCount: number;
 }
@@ -52,20 +86,25 @@ function nextDefaultTeamName(teamCount: number): string {
   return `Time ${String(teamCount + 1).padStart(2, "0")}`;
 }
 
-function AddTeamCard({ colors, onAddTeam, teamCount }: AddTeamCardProps) {
-  const defaultTeamName = nextDefaultTeamName(teamCount);
-  const [teamName, setTeamName] = useState(defaultTeamName);
+function AddTeamModal({
+  colors,
+  onAddTeam,
+  onClose,
+  teamCount,
+  visible,
+}: AddTeamModalProps) {
+  const [teamName, setTeamName] = useState(() => nextDefaultTeamName(teamCount));
   const [playerName, setPlayerName] = useState("");
   const [players, setPlayers] = useState<string[]>([]);
-  const previousDefaultRef = useRef(defaultTeamName);
   const playerInputRef = useRef<TextInput>(null);
 
   useEffect(() => {
-    setTeamName((current) =>
-      current === previousDefaultRef.current ? defaultTeamName : current,
-    );
-    previousDefaultRef.current = defaultTeamName;
-  }, [defaultTeamName]);
+    if (visible) {
+      setTeamName(nextDefaultTeamName(teamCount));
+      setPlayerName("");
+      setPlayers([]);
+    }
+  }, [visible, teamCount]);
 
   const trimmedTeamName = teamName.trim();
   const trimmedPlayerName = playerName.trim();
@@ -81,100 +120,160 @@ function AddTeamCard({ colors, onAddTeam, teamCount }: AddTeamCardProps) {
     playerInputRef.current?.focus();
   };
 
+  const removeDraftPlayer = (player: string) => {
+    setPlayers((current) => current.filter((existing) => existing !== player));
+  };
+
   const addTeam = () => {
     if (!trimmedTeamName) return;
     onAddTeam(trimmedTeamName, players);
-    setTeamName(nextDefaultTeamName(teamCount + 1));
-    setPlayerName("");
-    setPlayers([]);
+    onClose();
   };
 
   return (
-    <View style={styles.addSection}>
-      <Text style={[styles.addSectionTitle, { color: colors.text }]}>
-        Adicionar novo time
-      </Text>
-      <View
-        style={[
-          styles.addCard,
-          { backgroundColor: colors.card, borderColor: colors.border },
-        ]}
-      >
-        <TextInput
-          value={teamName}
-          onChangeText={setTeamName}
-          placeholder="Digite o nome do time"
-          placeholderTextColor={colors.placeholder}
-          returnKeyType="next"
-          style={[styles.teamInput, { color: colors.text }]}
-        />
-
-        {players.length === 0 ? (
-          <Text style={[styles.playersEmpty, { color: colors.textTertiary }]}>
-            Nenhum jogador adicionado
-          </Text>
-        ) : (
-          <View style={styles.playersList}>
-            {players.map((player) => (
-              <View
-                key={player}
-                style={[styles.playerPill, { backgroundColor: colors.surface }]}
-              >
-                <Text
-                  style={[styles.playerPillText, { color: colors.text }]}
-                  numberOfLines={1}
-                >
-                  {player}
-                </Text>
-              </View>
-            ))}
-          </View>
-        )}
-
-        <View style={styles.playerInputRow}>
-          <TextInput
-            ref={playerInputRef}
-            value={playerName}
-            onChangeText={setPlayerName}
-            placeholder="Digite o nome do jogador"
-            placeholderTextColor={colors.placeholder}
-            returnKeyType="done"
-            submitBehavior="submit"
-            onSubmitEditing={addDraftPlayer}
-            style={[
-              styles.playerInput,
-              { backgroundColor: colors.inputBg, color: colors.text },
-            ]}
-          />
-          <TouchableOpacity
-            onPress={addDraftPlayer}
-            activeOpacity={0.82}
-            style={[styles.addPlayerButton, { backgroundColor: colors.text }]}
-          >
-            <Ionicons
-              name="person-add-outline"
-              size={21}
-              color={colors.background}
-            />
-          </TouchableOpacity>
-        </View>
-
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      statusBarTranslucent
+      onRequestClose={onClose}
+    >
+      <View style={styles.modalOverlay}>
         <TouchableOpacity
-          onPress={addTeam}
-          activeOpacity={0.85}
-          style={[
-            styles.submitButton,
-            { backgroundColor: colors.text },
-            !trimmedTeamName && styles.submitButtonDisabled,
-          ]}
-          disabled={!trimmedTeamName}
+          style={styles.modalBackdrop}
+          activeOpacity={1}
+          onPress={onClose}
+        />
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={styles.modalKeyboardWrapper}
         >
-          <Text style={[styles.submitButtonText, { color: colors.background }]}>
-            Adicionar Time
-          </Text>
-        </TouchableOpacity>
+          <View
+            style={[
+              styles.modalSheet,
+              { backgroundColor: colors.modalBackground, borderColor: colors.border },
+            ]}
+          >
+            <View style={[styles.modalHandle, { backgroundColor: colors.border }]} />
+
+            <View style={styles.modalHeader}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>
+                Novo time
+              </Text>
+              <TouchableOpacity
+                onPress={onClose}
+                activeOpacity={0.8}
+                style={[styles.modalCloseButton, { backgroundColor: colors.surface }]}
+              >
+                <Ionicons name="close" size={18} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              style={styles.modalBody}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              <TextInput
+                value={teamName}
+                onChangeText={setTeamName}
+                placeholder="Digite o nome do time"
+                placeholderTextColor={colors.placeholder}
+                returnKeyType="next"
+                style={[styles.teamInput, { color: colors.text }]}
+              />
+
+              {players.length === 0 ? (
+                <Text
+                  style={[styles.playersEmpty, { color: colors.textSecondary }]}
+                >
+                  Nenhum jogador adicionado
+                </Text>
+              ) : (
+                <View style={styles.playersList}>
+                  {players.map((player) => (
+                    <View
+                      key={player}
+                      style={[
+                        styles.playerPill,
+                        { backgroundColor: colors.surface },
+                      ]}
+                    >
+                      <Text
+                        style={[styles.playerPillText, { color: colors.text }]}
+                        numberOfLines={1}
+                      >
+                        {player}
+                      </Text>
+                      <TouchableOpacity
+                        onPress={() => removeDraftPlayer(player)}
+                        activeOpacity={0.7}
+                        hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                        style={styles.playerPillRemove}
+                      >
+                        <Ionicons
+                          name="close"
+                          size={13}
+                          color={colors.textTertiary}
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              <View style={styles.playerInputRow}>
+                <TextInput
+                  ref={playerInputRef}
+                  value={playerName}
+                  onChangeText={setPlayerName}
+                  placeholder="Digite o nome do jogador"
+                  placeholderTextColor={colors.placeholder}
+                  returnKeyType="done"
+                  submitBehavior="submit"
+                  onSubmitEditing={addDraftPlayer}
+                  style={[
+                    styles.playerInput,
+                    { backgroundColor: colors.inputBg, color: colors.text },
+                  ]}
+                />
+                <TouchableOpacity
+                  onPress={addDraftPlayer}
+                  activeOpacity={0.82}
+                  style={[
+                    styles.addPlayerButton,
+                    { backgroundColor: colors.primary },
+                  ]}
+                >
+                  <Ionicons
+                    name="person-add-outline"
+                    size={21}
+                    color={colors.background}
+                  />
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+
+            <TouchableOpacity
+              onPress={addTeam}
+              activeOpacity={0.85}
+              style={[
+                styles.submitButton,
+                { backgroundColor: colors.primary },
+                !trimmedTeamName && styles.submitButtonDisabled,
+              ]}
+              disabled={!trimmedTeamName}
+            >
+              <Text
+                style={[styles.submitButtonText, { color: colors.background }]}
+              >
+                Adicionar
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
       </View>
-    </View>
+    </Modal>
   );
 }
 
@@ -188,6 +287,7 @@ interface TeamCardProps extends ThemedComponentProps {
   onRemoveParticipant: (teamName: string, participantName: string) => void;
   onRemoveTeam: (teamName: string) => void;
   onRenameTeam: (teamName: string, nextName: string) => boolean;
+  onReorderParticipants: (teamName: string, newOrder: string[]) => void;
   onUpdateParticipant: (
     teamName: string,
     participantIndex: number,
@@ -202,6 +302,7 @@ function  TeamCard({
   onRemoveParticipant,
   onRemoveTeam,
   onRenameTeam,
+  onReorderParticipants,
   onUpdateParticipant,
   participants,
   team,
@@ -323,16 +424,24 @@ function  TeamCard({
         </View>
       </View>
 
-      <FlatList
+      <NestableDraggableFlatList
         data={editingPlayers ? playerDrafts : participants}
-        keyExtractor={(_participant, participantIndex) =>
-          `${team}-${participantIndex}`
+        keyExtractor={(participant, participantIndex) =>
+          `${team}-${participantIndex}-${participant}`
         }
         style={styles.participantsCardList}
         contentContainerStyle={styles.participantsCardListContent}
-        scrollEnabled
+        activationDistance={12}
+        containerStyle={{ flexGrow: 0 }}
         nestedScrollEnabled
         showsVerticalScrollIndicator={false}
+        onDragEnd={({ data }) => {
+          if (editingPlayers) {
+            setPlayerDrafts(data);
+          } else {
+            onReorderParticipants(team, data);
+          }
+        }}
         ListEmptyComponent={
           !editingPlayers ? (
             <Text
@@ -342,13 +451,26 @@ function  TeamCard({
             </Text>
           ) : null
         }
-        renderItem={({ item: participant, index: participantIndex }) => (
-          <View style={styles.teamPlayerRow}>
-            <Ionicons
-              name="reorder-three"
-              size={18}
-              color={colors.textTertiary}
-            />
+        renderItem={({
+          item: participant,
+          getIndex,
+          drag,
+          isActive,
+        }: RenderItemParams<string>) => {
+          const participantIndex = getIndex() ?? 0;
+          return (
+            <View style={[styles.teamPlayerRow, isActive && styles.teamPlayerRowActive]}>
+              <TouchableOpacity
+                onLongPress={drag}
+                disabled={isActive}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons
+                  name="reorder-three"
+                  size={18}
+                  color={colors.textTertiary}
+                />
+              </TouchableOpacity>
             {editingPlayers ? (
               <>
                 <TextInput
@@ -409,8 +531,9 @@ function  TeamCard({
                 </View>
               </>
             )}
-          </View>
-        )}
+            </View>
+          );
+        }}
       />
 
       {editingPlayers ? (
@@ -432,7 +555,7 @@ function  TeamCard({
           <TouchableOpacity
             activeOpacity={0.8}
             onPress={addPlayer}
-            style={[styles.cardPlayerAddButton, { backgroundColor: colors.text }]}
+            style={[styles.cardPlayerAddButton, { backgroundColor: colors.primary }]}
           >
             <Ionicons name="add" size={18} color={colors.background} />
           </TouchableOpacity>
@@ -485,6 +608,7 @@ interface TeamsPreviewProps extends ThemedComponentProps {
   onRemoveParticipant: (teamName: string, participantName: string) => void;
   onRemoveTeam: (teamName: string) => void;
   onRenameTeam: (teamName: string, nextName: string) => boolean;
+  onReorderParticipants: (teamName: string, newOrder: string[]) => void;
   onUpdateParticipant: (
     teamName: string,
     participantIndex: number,
@@ -499,6 +623,7 @@ function TeamsPreview({
   onRemoveParticipant,
   onRemoveTeam,
   onRenameTeam,
+  onReorderParticipants,
   onUpdateParticipant,
   participantsByTeam,
   teams,
@@ -533,6 +658,7 @@ function TeamsPreview({
             onRemoveParticipant={onRemoveParticipant}
             onRemoveTeam={onRemoveTeam}
             onRenameTeam={onRenameTeam}
+            onReorderParticipants={onReorderParticipants}
             onUpdateParticipant={onUpdateParticipant}
             participants={participants}
             team={team}
@@ -547,6 +673,7 @@ function TeamsPreview({
 
 export default function TabTwoScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const {
     addParticipantToTeam,
     addScoreColumn,
@@ -556,11 +683,13 @@ export default function TabTwoScreen() {
     removeParticipant,
     removeScoreColumn,
     renameScoreColumn,
+    reorderParticipants,
     scoreColumns,
     updateParticipant,
   } = useApp();
 
   const hasTeams = scoreColumns.length > 0;
+  const [isAddTeamModalOpen, setIsAddTeamModalOpen] = useState(false);
 
   const contentStyle = useMemo(
     () => [
@@ -580,53 +709,67 @@ export default function TabTwoScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
-      style={[styles.screen, { backgroundColor: colors.background }]}
-    >
-      <ScrollView
-        style={{ backgroundColor: colors.background }}
-        contentContainerStyle={contentStyle}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
+    <>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={[styles.screen, { backgroundColor: colors.background }]}
       >
-        <View style={{ flex: 1, justifyContent: "space-between" }}>
-          <View>
-            <View style={styles.header}>
-              <View style={styles.titleBlock}>
-                <Text style={[styles.eyebrow, { color: colors.text }]}>Times</Text>
-                <Text style={[styles.title, { color: colors.text }]}>
-                  {hasTeams ? "Times registrados" : "Nenhum time registrado"}
-                </Text>
+        <NestableScrollContainer
+          style={{ backgroundColor: colors.background }}
+          contentContainerStyle={contentStyle}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={{ flex: 1, justifyContent: "space-between" }}>
+            <View>
+              <View style={styles.header}>
+                <View style={styles.titleBlock}>
+                  <Text style={[styles.eyebrow, { color: colors.text }]}>
+                    Times
+                  </Text>
+                  <Text style={[styles.title, { color: colors.text }]}>
+                    {hasTeams ? "Times registrados" : "Nenhum time registrado"}
+                  </Text>
+                </View>
+                <HeaderAction
+                  colors={colors}
+                  onPress={() => router.push("/draw")}
+                />
               </View>
-              <HeaderAction colors={colors} />
+
+              {!hasTeams ? (
+                <EmptyTeamsNotice colors={colors} />
+              ) : (
+                <TeamsPreview
+                  colors={colors}
+                  onAddParticipant={addParticipantToTeam}
+                  onMoveTeam={moveTeam}
+                  onRemoveParticipant={removeParticipant}
+                  onRemoveTeam={removeScoreColumn}
+                  onRenameTeam={renameScoreColumn}
+                  onReorderParticipants={reorderParticipants}
+                  onUpdateParticipant={updateParticipant}
+                  teams={scoreColumns}
+                  participantsByTeam={participantsByTeam}
+                />
+              )}
             </View>
 
-            {!hasTeams ? (
-              <EmptyTeamsNotice colors={colors} />
-            ) : (
-              <TeamsPreview
-                colors={colors}
-                onAddParticipant={addParticipantToTeam}
-                onMoveTeam={moveTeam}
-                onRemoveParticipant={removeParticipant}
-                onRemoveTeam={removeScoreColumn}
-                onRenameTeam={renameScoreColumn}
-                onUpdateParticipant={updateParticipant}
-                teams={scoreColumns}
-                participantsByTeam={participantsByTeam}
-              />
-            )}
+            <AddTeamTrigger
+              colors={colors}
+              onPress={() => setIsAddTeamModalOpen(true)}
+            />
           </View>
-
-          <AddTeamCard
-            colors={colors}
-            onAddTeam={handleAddTeam}
-            teamCount={scoreColumns.length}
-          />
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+        </NestableScrollContainer>
+      </KeyboardAvoidingView>
+      <AddTeamModal
+        colors={colors}
+        visible={isAddTeamModalOpen}
+        onClose={() => setIsAddTeamModalOpen(false)}
+        onAddTeam={handleAddTeam}
+        teamCount={scoreColumns.length}
+      />
+    </>
   );
 }
 
@@ -636,7 +779,7 @@ const styles = StyleSheet.create({
   },
   content: {
     flexGrow: 1,
-    paddingHorizontal: 40,
+    // paddingHorizontal: 40,
     gap: 28,
   },
   header: {
@@ -644,6 +787,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 16,
+    paddingHorizontal: 40,
   },
   titleBlock: {
     flex: 1,
@@ -669,7 +813,7 @@ const styles = StyleSheet.create({
   emptyNotice: {
     minHeight: 170,
     marginTop: 28,
-    marginHorizontal: 8,
+    marginHorizontal: 38,
     paddingHorizontal: 18,
     borderRadius: 28,
     alignItems: "center",
@@ -690,7 +834,8 @@ const styles = StyleSheet.create({
   teamsPreview: {
     gap: 12,
     marginTop: 24,
-    paddingRight: 4,
+    paddingRight: 40,
+    paddingLeft: 40,
   },
   teamCard: {
     width: 210,
@@ -749,6 +894,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     minHeight: 26,
+  },
+  teamPlayerRowActive: {
+    opacity: 0.6,
   },
   teamPlayerName: {
     flex: 1,
@@ -824,20 +972,67 @@ const styles = StyleSheet.create({
   },
   addSection: {
     marginHorizontal: 10,
+    paddingHorizontal: 20,
+    marginTop: 20,
   },
-  addSectionTitle: {
-    fontSize: 24,
+  addTriggerButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    height: 52,
+    borderRadius: 16,
+  },
+  addTriggerButtonText: {
+    fontSize: 16,
     fontWeight: "800",
-    lineHeight: 34,
-    marginBottom: 10,
   },
-  addCard: {
-    minHeight: 260,
-    borderRadius: 28,
+  modalOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0, 0, 0, 0.45)",
+  },
+  modalBackdrop: StyleSheet.absoluteFill,
+  modalKeyboardWrapper: {
+    width: "100%",
+    maxHeight: "50%",
+  },
+  modalSheet: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     borderWidth: 1,
+    borderBottomWidth: 0,
     paddingHorizontal: 24,
-    paddingTop: 22,
+    paddingTop: 12,
     paddingBottom: 22,
+  },
+  modalHandle: {
+    alignSelf: "center",
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    marginBottom: 14,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: "800",
+  },
+  modalCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalBody: {
+    flexShrink: 1,
+    flexGrow: 0,
   },
   teamInput: {
     fontSize: 20,
@@ -850,28 +1045,37 @@ const styles = StyleSheet.create({
     fontWeight: "400",
     lineHeight: 27,
     marginTop: 8,
+    marginBottom: 30,
   },
   playersList: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
     marginTop: 12,
+    marginBottom: 30,
   },
   playerPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
     maxWidth: "100%",
     borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
   playerPillText: {
+    flexShrink: 1,
     fontSize: 14,
     fontWeight: "700",
+  },
+  playerPillRemove: {
+    alignItems: "center",
+    justifyContent: "center",
   },
   playerInputRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    marginTop: "auto",
   },
   playerInput: {
     flex: 1,
@@ -882,7 +1086,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 0,
     borderWidth: 1,
-    borderColor: "red",
+    borderColor: "gray",
   },
   addPlayerButton: {
     width: 37,

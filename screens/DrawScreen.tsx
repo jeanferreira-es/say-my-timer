@@ -1,19 +1,237 @@
 import { Ionicons } from "@expo/vector-icons";
+import { createAudioPlayer, setAudioModeAsync } from "expo-audio";
 import { useRouter } from "expo-router";
-import React, { useCallback, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Animated,
+  GestureResponderEvent,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View
+  View,
 } from "react-native";
 import { useApp } from "../context/AppContext";
+
+const DRAW_FINISH_SOUND = require("../assets/audio/start.wav");
+
+interface TouchPoint {
+  id: string;
+  x: number;
+  y: number;
+}
+
+type DrawPhase = "idle" | "collecting" | "spinning" | "result" | "revealed";
+
+const MIN_PARTICIPANTS = 2;
+const COLLECT_DELAY_MS = 2200;
+const REVEAL_DURATION_MS = 2600;
+const CIRCLE_SIZE = 60;
+const WINNER_CIRCLE_SIZE = 88;
+
+function extractTouches(evt: GestureResponderEvent): TouchPoint[] {
+  return evt.nativeEvent.touches.map((touch) => ({
+    id: String(touch.identifier),
+    x: touch.locationX,
+    y: touch.locationY,
+  }));
+}
+
+function statusMessage(phase: DrawPhase, participantCount: number): string {
+  switch (phase) {
+    case "collecting":
+      return participantCount < MIN_PARTICIPANTS
+        ? "Aguardando mais participantes tocarem a tela..."
+        : "Mantenha o dedo na tela, o sorteio vai começar...";
+    case "spinning":
+      return "Sorteando...";
+    case "result":
+      return "Escolhido! Solte os dedos para revelar.";
+    case "revealed":
+      return "Participante selecionado!";
+    default:
+      return "Peça para todos tocarem a tela com o dedo ao mesmo tempo.";
+  }
+}
+
+function TouchCircle({
+  x,
+  y,
+  color,
+  size = CIRCLE_SIZE,
+}: {
+  x: number;
+  y: number;
+  color: string;
+  size?: number;
+}) {
+  return (
+    <View
+      pointerEvents="none"
+      style={[
+        styles.touchCircle,
+        {
+          left: x - size / 2,
+          top: y - size / 2,
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: color,
+        },
+      ]}
+    />
+  );
+}
 
 export default function DrawScreen() {
   const router = useRouter();
   const { colors } = useApp();
 
-  const handleGoBack = useCallback(async () => {
+  const [phase, setPhase] = useState<DrawPhase>("idle");
+  const [touches, setTouches] = useState<TouchPoint[]>([]);
+  const [frozenTouches, setFrozenTouches] = useState<TouchPoint[]>([]);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const [winnerId, setWinnerId] = useState<string | null>(null);
+
+  const phaseRef = useRef(phase);
+  const touchesRef = useRef(touches);
+  const spinTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const revealOpacity = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
+
+  useEffect(() => {
+    touchesRef.current = touches;
+  }, [touches]);
+
+  const resetDraw = useCallback(() => {
+    setPhase("idle");
+    setTouches([]);
+    setFrozenTouches([]);
+    setHighlightId(null);
+    setWinnerId(null);
+  }, []);
+
+  const playFinishSound = useCallback(async () => {
+    try {
+      await setAudioModeAsync({
+        playsInSilentMode: true,
+        interruptionMode: "duckOthers",
+        shouldPlayInBackground: false,
+      });
+      const sound = createAudioPlayer(DRAW_FINISH_SOUND);
+      let subscription: { remove(): void } | null = null;
+      subscription = sound.addListener("playbackStatusUpdate", (status) => {
+        if (status.isLoaded && status.didJustFinish && !status.loop) {
+          subscription?.remove();
+          sound.remove();
+        }
+      });
+      sound.play();
+    } catch (e) {
+      const err = e as { message?: string };
+      console.warn("Erro ao tocar som do sorteio:", err?.message ?? e);
+    }
+  }, []);
+
+  const startSpin = useCallback((snapshot: TouchPoint[]) => {
+    if (snapshot.length < MIN_PARTICIPANTS) return;
+
+    setFrozenTouches(snapshot);
+    setHighlightId(null);
+    setWinnerId(null);
+    setPhase("spinning");
+
+    const ids = snapshot.map((touch) => touch.id);
+    const winner = ids[Math.floor(Math.random() * ids.length)];
+    const totalSteps = 18 + Math.floor(Math.random() * 6);
+    let delay = 70;
+    let step = 0;
+
+    const tick = () => {
+      step += 1;
+      const isLast = step >= totalSteps;
+      const currentId = isLast
+        ? winner
+        : ids[Math.floor(Math.random() * ids.length)];
+      setHighlightId(currentId);
+
+      if (isLast) {
+        setWinnerId(winner);
+        setPhase("result");
+        playFinishSound();
+        return;
+      }
+
+      delay = Math.min(delay * 1.18, 420);
+      spinTimeoutRef.current = setTimeout(tick, delay);
+    };
+
+    spinTimeoutRef.current = setTimeout(tick, delay);
+  }, [playFinishSound]);
+
+  useEffect(() => {
+    if (phase !== "collecting" || touches.length < MIN_PARTICIPANTS) return;
+    const timer = setTimeout(() => {
+      startSpin(touchesRef.current);
+    }, COLLECT_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [phase, touches.length, startSpin]);
+
+  useEffect(() => {
+    if (phase !== "revealed") return;
+    revealOpacity.setValue(1);
+    const animation = Animated.sequence([
+      Animated.delay(REVEAL_DURATION_MS - 500),
+      Animated.timing(revealOpacity, {
+        toValue: 0,
+        duration: 500,
+        useNativeDriver: true,
+      }),
+    ]);
+    animation.start();
+    const timer = setTimeout(resetDraw, REVEAL_DURATION_MS);
+    return () => {
+      animation.stop();
+      clearTimeout(timer);
+    };
+  }, [phase, resetDraw, revealOpacity]);
+
+  useEffect(() => {
+    return () => {
+      if (spinTimeoutRef.current) clearTimeout(spinTimeoutRef.current);
+    };
+  }, []);
+
+  const handleTouchChange = useCallback((evt: GestureResponderEvent) => {
+    if (phaseRef.current === "spinning" || phaseRef.current === "result" || phaseRef.current === "revealed") {
+      return;
+    }
+    const next = extractTouches(evt);
+    setTouches(next);
+    if (next.length > 0) {
+      setPhase((current) => (current === "idle" ? "collecting" : current));
+    }
+  }, []);
+
+  const handleTouchEnd = useCallback((evt: GestureResponderEvent) => {
+    const remaining = extractTouches(evt);
+
+    if (phaseRef.current === "collecting") {
+      setTouches(remaining);
+      if (remaining.length === 0) {
+        setPhase("idle");
+      }
+      return;
+    }
+
+    if (phaseRef.current === "result" && remaining.length === 0) {
+      setPhase("revealed");
+    }
+  }, []);
+
+  const handleGoBack = useCallback(() => {
     router.back();
   }, [router]);
 
@@ -35,6 +253,29 @@ export default function DrawScreen() {
     [colors],
   );
 
+  const visibleCircles = useMemo(() => {
+    if (phase === "collecting") {
+      return touches.map((touch) => ({ ...touch, color: colors.primary, size: CIRCLE_SIZE }));
+    }
+    if (phase === "spinning" || phase === "result") {
+      return frozenTouches.map((touch) => {
+        const isActive =
+          phase === "spinning" ? touch.id === highlightId : touch.id === winnerId;
+        return {
+          ...touch,
+          color: isActive ? colors.accent : colors.primary,
+          size: isActive ? WINNER_CIRCLE_SIZE : CIRCLE_SIZE,
+        };
+      });
+    }
+    return [];
+  }, [phase, touches, frozenTouches, highlightId, winnerId, colors]);
+
+  const winnerCircle = useMemo(
+    () => frozenTouches.find((touch) => touch.id === winnerId) ?? null,
+    [frozenTouches, winnerId],
+  );
+
   return (
     <View style={themedStyles.container}>
       <View style={themedStyles.header}>
@@ -49,9 +290,46 @@ export default function DrawScreen() {
       </View>
 
       <Text style={themedStyles.subtitle}>
-        Escolha os participantes pressionando sobre a tela até que reste apenas
-        um participante.
+        {statusMessage(phase, touches.length)}
       </Text>
+
+      <View
+        style={styles.touchArea}
+        onStartShouldSetResponder={() => true}
+        onMoveShouldSetResponder={() => true}
+        onResponderGrant={handleTouchChange}
+        onResponderMove={handleTouchChange}
+        onResponderRelease={handleTouchEnd}
+        onResponderTerminate={handleTouchEnd}
+      >
+        {visibleCircles.map((circle) => (
+          <TouchCircle
+            key={circle.id}
+            x={circle.x}
+            y={circle.y}
+            color={circle.color}
+            size={circle.size}
+          />
+        ))}
+
+        {phase === "revealed" && winnerCircle ? (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.touchCircle,
+              {
+                left: winnerCircle.x - WINNER_CIRCLE_SIZE / 2,
+                top: winnerCircle.y - WINNER_CIRCLE_SIZE / 2,
+                width: WINNER_CIRCLE_SIZE,
+                height: WINNER_CIRCLE_SIZE,
+                borderRadius: WINNER_CIRCLE_SIZE / 2,
+                backgroundColor: colors.accent,
+                opacity: revealOpacity,
+              },
+            ]}
+          />
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -78,9 +356,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginTop: 2,
   },
-  headerText: {
-    flex: 1,
-  },
   titleBase: {
     fontSize: 24,
     fontWeight: "700",
@@ -88,53 +363,13 @@ const styles = StyleSheet.create({
   subtitleBase: {
     fontSize: 14,
     lineHeight: 20,
-    marginTop: 6,
+    marginTop: 14,
+    paddingHorizontal: 20,
   },
-  listContentBase: {
-    padding: 20,
-    gap: 12,
-  },
-  optionCardBase: {
-    borderWidth: 1,
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  optionRowBase: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  optionTextWrapper: {
+  touchArea: {
     flex: 1,
-    marginLeft: 14,
-    marginRight: 12,
   },
-  optionTextBase: {
-    fontSize: 16,
-    fontWeight: "600",
-  },
-  optionHintBase: {
-    fontSize: 13,
-    marginTop: 4,
-  },
-  previewButtonBase: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  radioOuterBase: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 2,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  radioInnerBase: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+  touchCircle: {
+    position: "absolute",
   },
 });
