@@ -25,8 +25,12 @@ type DrawPhase = "idle" | "collecting" | "spinning" | "result" | "revealed";
 const MIN_PARTICIPANTS = 2;
 const COLLECT_DELAY_MS = 2200;
 const REVEAL_DURATION_MS = 2600;
-const CIRCLE_SIZE = 60;
+const CIRCLE_SIZE = 70;
 const WINNER_CIRCLE_SIZE = 88;
+const TOUCH_RING_EXTRA = 16;
+const TOUCH_RING_BORDER_WIDTH = 3;
+const PULSE_DURATION_MS = 1200;
+const PULSE_MAX_SCALE = 2.2;
 
 function extractTouches(evt: GestureResponderEvent): TouchPoint[] {
   return evt.nativeEvent.touches.map((touch) => ({
@@ -58,24 +62,100 @@ function TouchCircle({
   y,
   color,
   size = CIRCLE_SIZE,
+  showRing = false,
 }: {
   x: number;
   y: number;
   color: string;
   size?: number;
+  showRing?: boolean;
 }) {
+  const ringSize = size + TOUCH_RING_EXTRA * 2;
   return (
-    <View
+    <>
+      {showRing ? (
+        <View
+          pointerEvents="none"
+          style={[
+            styles.touchRing,
+            {
+              left: x - ringSize / 2,
+              top: y - ringSize / 2,
+              width: ringSize,
+              height: ringSize,
+              borderRadius: ringSize / 2,
+              borderColor: color,
+            },
+          ]}
+        />
+      ) : null}
+      <View
+        pointerEvents="none"
+        style={[
+          styles.touchCircle,
+          {
+            left: x - size / 2,
+            top: y - size / 2,
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            backgroundColor: color,
+          },
+        ]}
+      />
+    </>
+  );
+}
+
+function WinnerPulse({
+  x,
+  y,
+  color,
+  size,
+}: {
+  x: number;
+  y: number;
+  color: string;
+  size: number;
+}) {
+  const pulseAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    pulseAnim.setValue(0);
+    const animation = Animated.loop(
+      Animated.timing(pulseAnim, {
+        toValue: 1,
+        duration: PULSE_DURATION_MS,
+        useNativeDriver: true,
+      }),
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [pulseAnim]);
+
+  const scale = pulseAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, PULSE_MAX_SCALE],
+  });
+  const opacity = pulseAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.55, 0],
+  });
+
+  return (
+    <Animated.View
       pointerEvents="none"
       style={[
-        styles.touchCircle,
+        styles.pulseRing,
         {
           left: x - size / 2,
           top: y - size / 2,
           width: size,
           height: size,
           borderRadius: size / 2,
-          backgroundColor: color,
+          borderColor: color,
+          opacity,
+          transform: [{ scale }],
         },
       ]}
     />
@@ -91,6 +171,7 @@ export default function DrawScreen() {
   const [frozenTouches, setFrozenTouches] = useState<TouchPoint[]>([]);
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const [winnerId, setWinnerId] = useState<string | null>(null);
+  const [touchAreaOrigin, setTouchAreaOrigin] = useState({ x: 0, y: 0 });
 
   const phaseRef = useRef(phase);
   const touchesRef = useRef(touches);
@@ -180,6 +261,11 @@ export default function DrawScreen() {
   }, [phase, touches.length, startSpin]);
 
   useEffect(() => {
+    if (phase !== "result") return;
+    revealOpacity.setValue(1);
+  }, [phase, revealOpacity]);
+
+  useEffect(() => {
     if (phase !== "revealed") return;
     revealOpacity.setValue(1);
     const animation = Animated.sequence([
@@ -255,21 +341,26 @@ export default function DrawScreen() {
 
   const visibleCircles = useMemo(() => {
     if (phase === "collecting") {
-      return touches.map((touch) => ({ ...touch, color: colors.primary, size: CIRCLE_SIZE }));
+      return touches.map((touch) => ({
+        ...touch,
+        color: colors.primary,
+        size: CIRCLE_SIZE,
+        ring: true,
+      }));
     }
-    if (phase === "spinning" || phase === "result") {
+    if (phase === "spinning") {
       return frozenTouches.map((touch) => {
-        const isActive =
-          phase === "spinning" ? touch.id === highlightId : touch.id === winnerId;
+        const isActive = touch.id === highlightId;
         return {
           ...touch,
           color: isActive ? colors.accent : colors.primary,
           size: isActive ? WINNER_CIRCLE_SIZE : CIRCLE_SIZE,
+          ring: false,
         };
       });
     }
     return [];
-  }, [phase, touches, frozenTouches, highlightId, winnerId, colors]);
+  }, [phase, touches, frozenTouches, highlightId, colors]);
 
   const winnerCircle = useMemo(
     () => frozenTouches.find((touch) => touch.id === winnerId) ?? null,
@@ -295,6 +386,10 @@ export default function DrawScreen() {
 
       <View
         style={styles.touchArea}
+        onLayout={(evt) => {
+          const { x, y } = evt.nativeEvent.layout;
+          setTouchAreaOrigin({ x, y });
+        }}
         onStartShouldSetResponder={() => true}
         onMoveShouldSetResponder={() => true}
         onResponderGrant={handleTouchChange}
@@ -309,27 +404,42 @@ export default function DrawScreen() {
             y={circle.y}
             color={circle.color}
             size={circle.size}
+            showRing={circle.ring}
           />
         ))}
+      </View>
 
-        {phase === "revealed" && winnerCircle ? (
-          <Animated.View
-            pointerEvents="none"
+      {(phase === "result" || phase === "revealed") && winnerCircle ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFill,
+            { backgroundColor: colors.accent, opacity: revealOpacity },
+          ]}
+        >
+          <WinnerPulse
+            x={touchAreaOrigin.x + winnerCircle.x}
+            y={touchAreaOrigin.y + winnerCircle.y}
+            color={colors.background}
+            size={WINNER_CIRCLE_SIZE}
+          />
+          <View
             style={[
               styles.touchCircle,
               {
-                left: winnerCircle.x - WINNER_CIRCLE_SIZE / 2,
-                top: winnerCircle.y - WINNER_CIRCLE_SIZE / 2,
+                left:
+                  touchAreaOrigin.x + winnerCircle.x - WINNER_CIRCLE_SIZE / 2,
+                top:
+                  touchAreaOrigin.y + winnerCircle.y - WINNER_CIRCLE_SIZE / 2,
                 width: WINNER_CIRCLE_SIZE,
                 height: WINNER_CIRCLE_SIZE,
                 borderRadius: WINNER_CIRCLE_SIZE / 2,
-                backgroundColor: colors.accent,
-                opacity: revealOpacity,
+                backgroundColor: colors.background,
               },
             ]}
           />
-        ) : null}
-      </View>
+        </Animated.View>
+      ) : null}
     </View>
   );
 }
@@ -371,5 +481,14 @@ const styles = StyleSheet.create({
   },
   touchCircle: {
     position: "absolute",
+  },
+  touchRing: {
+    position: "absolute",
+    borderWidth: TOUCH_RING_BORDER_WIDTH,
+    opacity: 0.5,
+  },
+  pulseRing: {
+    position: "absolute",
+    borderWidth: TOUCH_RING_BORDER_WIDTH,
   },
 });

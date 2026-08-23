@@ -2,6 +2,8 @@ import { FontAwesome6, Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Animated,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -66,7 +68,6 @@ function AddTeamTrigger({ colors, onPress }: AddTeamTriggerProps) {
         activeOpacity={0.85}
         style={[styles.addTriggerButton, { backgroundColor: colors.primary }]}
       >
-        <Ionicons name="add-circle-outline" size={20} color={colors.background} />
         <Text style={[styles.addTriggerButtonText, { color: colors.background }]}>
           Adicionar novo time
         </Text>
@@ -86,6 +87,41 @@ function nextDefaultTeamName(teamCount: number): string {
   return `Time ${String(teamCount + 1).padStart(2, "0")}`;
 }
 
+function useKeyboardOffset() {
+  const offset = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+
+    const handleShow = (event: { endCoordinates: { height: number }; duration?: number }) => {
+      Animated.timing(offset, {
+        toValue: event.endCoordinates.height,
+        duration: event.duration || 250,
+        useNativeDriver: true,
+      }).start();
+    };
+
+    const handleHide = (event: { duration?: number }) => {
+      Animated.timing(offset, {
+        toValue: 0,
+        duration: event.duration || 200,
+        useNativeDriver: true,
+      }).start();
+    };
+
+    const showSubscription = Keyboard.addListener(showEvent, handleShow);
+    const hideSubscription = Keyboard.addListener(hideEvent, handleHide);
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, [offset]);
+
+  return offset;
+}
+
 function AddTeamModal({
   colors,
   onAddTeam,
@@ -97,6 +133,7 @@ function AddTeamModal({
   const [playerName, setPlayerName] = useState("");
   const [players, setPlayers] = useState<string[]>([]);
   const playerInputRef = useRef<TextInput>(null);
+  const keyboardOffset = useKeyboardOffset();
 
   useEffect(() => {
     if (visible) {
@@ -144,9 +181,11 @@ function AddTeamModal({
           activeOpacity={1}
           onPress={onClose}
         />
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          style={styles.modalKeyboardWrapper}
+        <Animated.View
+          style={[
+            styles.modalKeyboardWrapper,
+            { transform: [{ translateY: Animated.multiply(keyboardOffset, -1) }] },
+          ]}
         >
           <View
             style={[
@@ -271,7 +310,7 @@ function AddTeamModal({
               </Text>
             </TouchableOpacity>
           </View>
-        </KeyboardAvoidingView>
+        </Animated.View>
       </View>
     </Modal>
   );
@@ -671,7 +710,7 @@ function TeamsPreview({
   );
 }
 
-export default function TabTwoScreen() {
+export default function TeamsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const {
@@ -696,7 +735,7 @@ export default function TabTwoScreen() {
       styles.content,
       {
         paddingTop: Math.max(insets.top, 18) + 26,
-        paddingBottom: Math.max(insets.bottom, 20) + 104,
+        paddingBottom: Math.max(insets.bottom, 20) + 24,
       },
     ],
     [insets.bottom, insets.top],
@@ -722,7 +761,17 @@ export default function TabTwoScreen() {
         >
           <View style={{ flex: 1, justifyContent: "space-between" }}>
             <View>
-              <View style={styles.header}>
+              <View style={[styles.header, { borderBottomColor: colors.border }]}>
+                <TouchableOpacity
+                  style={[
+                    styles.backButton,
+                    { borderColor: colors.border, backgroundColor: colors.surface },
+                  ]}
+                  onPress={() => router.back()}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="arrow-back" size={20} color={colors.text} />
+                </TouchableOpacity>
                 <View style={styles.titleBlock}>
                   <Text style={[styles.eyebrow, { color: colors.text }]}>
                     Times
@@ -785,9 +834,19 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: 16,
-    paddingHorizontal: 40,
+    gap: 12,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    borderBottomWidth: 1,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 2,
   },
   titleBlock: {
     flex: 1,

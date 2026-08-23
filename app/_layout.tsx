@@ -10,7 +10,7 @@ import "react-native-reanimated";
 export { ErrorBoundary } from "expo-router";
 
 export const unstable_settings = {
-  initialRouteName: "(tabs)",
+  initialRouteName: "index",
 };
 
 SplashScreen.preventAutoHideAsync();
@@ -40,7 +40,7 @@ export default function RootLayout() {
 
 function ThemeStatusBar() {
   const { themeMode } = useApp();
-  const style = themeMode === "dark" ? "dark" : "light";
+  const style = themeMode === "dark" ? "light" : "dark";
   return <StatusBar style={style} animated={true} hidden />;
 }
 
@@ -50,7 +50,8 @@ function RootLayoutNav() {
       <AppProvider>
         <ThemeStatusBar />
         <Stack>
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="index" options={{ headerShown: false }} />
+          <Stack.Screen name="teams" options={{ headerShown: false }} />
           <Stack.Screen name="alarm" options={{ headerShown: false }} />
           <Stack.Screen name="score" options={{ headerShown: false }} />
           <Stack.Screen name="draw" options={{ headerShown: false }} />

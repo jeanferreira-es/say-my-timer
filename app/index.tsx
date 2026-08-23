@@ -23,6 +23,7 @@ import React, {
   useState,
 } from "react";
 import {
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -40,7 +41,7 @@ import Animated, {
 } from "react-native-reanimated";
 import Svg, { Circle } from "react-native-svg";
 
-const START_SOUND = require("../../assets/audio/start.wav");
+const START_SOUND = require("../assets/audio/start.wav");
 const ALARM_VIBRATION_PATTERN = [0, 300, 100, 300, 100, 500];
 
 const DURATION_MS = 400;
@@ -341,6 +342,17 @@ export default function HomeScreen() {
     timer15Ref.current?.reset();
   }, []);
 
+  const handlePreviousPlayer = useCallback(() => {
+    setExpandedTimer(null);
+    timer30Ref.current?.reset();
+    timer15Ref.current?.reset();
+    setCurrentPlayerIndex((i) =>
+      orderedPlayerList.length > 0
+        ? (i - 1 + orderedPlayerList.length) % orderedPlayerList.length
+        : 0,
+    );
+  }, [orderedPlayerList.length]);
+
   const stopAlarm = useCallback(async () => {
     try {
       const sound = alarmSoundRef.current;
@@ -520,6 +532,17 @@ export default function HomeScreen() {
       <View style={styles.timersRow}>
         <View style={styles.timerControlsRow}>
           <TouchableOpacity
+            onPress={handlePreviousPlayer}
+            activeOpacity={0.8}
+            disabled={orderedPlayerList.length === 0}
+            style={[
+              orderedPlayerList.length === 0 &&
+                styles.timerControlButtonDisabled,
+            ]}
+          >
+            <Ionicons name="play-back" size={32} color={colors.text} />
+          </TouchableOpacity>
+          <TouchableOpacity
             onPress={handleRestartTimers}
             activeOpacity={0.8}
             disabled={!expandedTimer}
@@ -574,6 +597,17 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
       </View>
+
+      <TouchableOpacity
+        onPress={() => router.push("/teams" as never)}
+        activeOpacity={0.85}
+        style={[
+          styles.teamsFab,
+          { backgroundColor: colors.primary, shadowColor: "#000" },
+        ]}
+      >
+        <FontAwesome6 name="chess-knight" size={22} color={colors.background} />
+      </TouchableOpacity>
     </View>
   );
 }
@@ -647,8 +681,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   timerControlsRow: {
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
+    gap: 28,
     marginBottom: 10,
   },
   timerControlButton: {
@@ -699,5 +735,19 @@ const styles = StyleSheet.create({
   timerLabelBase: {
     fontSize: 12,
     marginTop: 4,
+  },
+  teamsFab: {
+    position: "absolute",
+    right: 24,
+    bottom: Platform.OS === "ios" ? 40 : 24,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    elevation: 6,
   },
 });

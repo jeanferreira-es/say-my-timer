@@ -64,10 +64,10 @@ export interface AppContextValue {
 }
 
 const defaultScores: ScoreRow[] = [
-  { id: "R1", scores: {} },
-  { id: "R2", scores: {} },
-  { id: "RFast", scores: {} },
-  { id: "R3", scores: {} },
+  { id: "1ª Rodada", scores: {} },
+  { id: "2ª Rodada", scores: {} },
+  { id: "Rodada Relâmpago", scores: {} },
+  { id: "3ª Rodada", scores: {} },
   { id: "Total", scores: {} },
 ];
 
