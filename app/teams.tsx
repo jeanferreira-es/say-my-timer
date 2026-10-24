@@ -78,10 +78,47 @@ function AddTeamTrigger({ colors, onPress }: AddTeamTriggerProps) {
   );
 }
 
+type SuggestPlayers = (query: string, exclude: string[]) => string[];
+
+interface PlayerSuggestionsProps extends ThemedComponentProps {
+  suggestions: string[];
+  onSelect: (playerName: string) => void;
+}
+
+function PlayerSuggestions({
+  colors,
+  onSelect,
+  suggestions,
+}: PlayerSuggestionsProps) {
+  if (suggestions.length === 0) return null;
+
+  return (
+    <View style={styles.suggestionsList}>
+      {suggestions.map((suggestion) => (
+        <TouchableOpacity
+          key={suggestion}
+          onPress={() => onSelect(suggestion)}
+          activeOpacity={0.8}
+          style={[styles.suggestionChip, { borderColor: colors.primary }]}
+        >
+          <Ionicons name="time-outline" size={12} color={colors.primary} />
+          <Text
+            numberOfLines={1}
+            style={[styles.suggestionChipText, { color: colors.text }]}
+          >
+            {suggestion}
+          </Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
+
 interface AddTeamModalProps extends ThemedComponentProps {
   visible: boolean;
   onClose: () => void;
   onAddTeam: (teamName: string, players: string[]) => void;
+  suggestPlayers: SuggestPlayers;
   teamCount: number;
 }
 
@@ -128,6 +165,7 @@ function AddTeamModal({
   colors,
   onAddTeam,
   onClose,
+  suggestPlayers,
   teamCount,
   visible,
 }: AddTeamModalProps) {
@@ -146,9 +184,10 @@ function AddTeamModal({
   }, [visible, teamCount]);
 
   const trimmedTeamName = teamName.trim();
-  const trimmedPlayerName = playerName.trim();
+  const playerSuggestions = suggestPlayers(playerName, players);
 
-  const addDraftPlayer = () => {
+  const addDraftPlayer = (name: string) => {
+    const trimmedPlayerName = name.trim();
     if (!trimmedPlayerName) return;
     const alreadyExists = players.some(
       (player) => player.toLowerCase() === trimmedPlayerName.toLowerCase(),
@@ -286,14 +325,14 @@ function AddTeamModal({
                   placeholderTextColor={colors.placeholder}
                   returnKeyType="done"
                   submitBehavior="submit"
-                  onSubmitEditing={addDraftPlayer}
+                  onSubmitEditing={() => addDraftPlayer(playerName)}
                   style={[
                     styles.playerInput,
                     { backgroundColor: colors.inputBg, color: colors.text },
                   ]}
                 />
                 <TouchableOpacity
-                  onPress={addDraftPlayer}
+                  onPress={() => addDraftPlayer(playerName)}
                   activeOpacity={0.82}
                   style={[
                     styles.addPlayerButton,
@@ -307,6 +346,11 @@ function AddTeamModal({
                   />
                 </TouchableOpacity>
               </View>
+              <PlayerSuggestions
+                colors={colors}
+                suggestions={playerSuggestions}
+                onSelect={addDraftPlayer}
+              />
             </ScrollView>
           </View>
         </Animated.View>
@@ -331,6 +375,7 @@ interface TeamCardProps extends ThemedComponentProps {
     participantIndex: number,
     nextName: string,
   ) => boolean;
+  suggestPlayers: SuggestPlayers;
 }
 
 function  TeamCard({
@@ -343,6 +388,7 @@ function  TeamCard({
   onReorderParticipants,
   onUpdateParticipant,
   participants,
+  suggestPlayers,
   team,
   teamIndex,
   totalTeams,
@@ -380,10 +426,14 @@ function  TeamCard({
     setEditingPlayers(false);
   };
 
-  const addPlayer = () => {
-    if (onAddParticipant(team, newPlayerName)) {
+  const playerSuggestions = editingPlayers
+    ? suggestPlayers(newPlayerName, playerDrafts).slice(0, 3)
+    : [];
+
+  const addPlayer = (name: string) => {
+    if (onAddParticipant(team, name)) {
       setNewPlayerName("");
-      setPlayerDrafts((current) => [...current, newPlayerName.trim()]);
+      setPlayerDrafts((current) => [...current, name.trim()]);
       newPlayerInputRef.current?.focus();
     }
   };
@@ -580,7 +630,7 @@ function  TeamCard({
             ref={newPlayerInputRef}
             value={newPlayerName}
             onChangeText={setNewPlayerName}
-            onSubmitEditing={addPlayer}
+            onSubmitEditing={() => addPlayer(newPlayerName)}
             placeholder="Novo jogador"
             placeholderTextColor={colors.placeholder}
             returnKeyType="done"
@@ -592,7 +642,7 @@ function  TeamCard({
           />
           <TouchableOpacity
             activeOpacity={0.8}
-            onPress={addPlayer}
+            onPress={() => addPlayer(newPlayerName)}
             style={[styles.cardPlayerAddButton, { backgroundColor: colors.primary }]}
           >
             <Ionicons name="add" size={18} color={colors.background} />
@@ -606,6 +656,12 @@ function  TeamCard({
           </TouchableOpacity>
         </View>
       ) : null}
+
+      <PlayerSuggestions
+        colors={colors}
+        suggestions={playerSuggestions}
+        onSelect={addPlayer}
+      />
 
       <View style={[styles.teamCardFooter, { borderTopColor: colors.border }]}>
         <TouchableOpacity
@@ -652,6 +708,7 @@ interface TeamsPreviewProps extends ThemedComponentProps {
     participantIndex: number,
     nextName: string,
   ) => boolean;
+  suggestPlayers: SuggestPlayers;
 }
 
 function TeamsPreview({
@@ -664,6 +721,7 @@ function TeamsPreview({
   onReorderParticipants,
   onUpdateParticipant,
   participantsByTeam,
+  suggestPlayers,
   teams,
 }: TeamsPreviewProps) {
   const scrollRef = useRef<ScrollViewInstance>(null);
@@ -699,6 +757,7 @@ function TeamsPreview({
             onReorderParticipants={onReorderParticipants}
             onUpdateParticipant={onUpdateParticipant}
             participants={participants}
+            suggestPlayers={suggestPlayers}
             team={team}
             teamIndex={teamIndex}
             totalTeams={teams.length}
@@ -716,6 +775,7 @@ export default function TeamsScreen() {
     addParticipantToTeam,
     addScoreColumn,
     colors,
+    getPlayerSuggestions,
     moveTeam,
     participantsByTeam,
     removeParticipant,
@@ -739,6 +799,13 @@ export default function TeamsScreen() {
     ],
     [insets.bottom, insets.top],
   );
+
+  // Players already in a team are never suggested again.
+  const suggestPlayers: SuggestPlayers = (query, exclude) =>
+    getPlayerSuggestions(query, [
+      ...Object.values(participantsByTeam).flat(),
+      ...exclude,
+    ]);
 
   const handleAddTeam = (teamName: string, players: string[]) => {
     const wasAdded = addScoreColumn(teamName);
@@ -799,6 +866,7 @@ export default function TeamsScreen() {
                   onUpdateParticipant={updateParticipant}
                   teams={scoreColumns}
                   participantsByTeam={participantsByTeam}
+                  suggestPlayers={suggestPlayers}
                 />
               )}
             </View>
@@ -815,6 +883,7 @@ export default function TeamsScreen() {
         visible={isAddTeamModalOpen}
         onClose={() => setIsAddTeamModalOpen(false)}
         onAddTeam={handleAddTeam}
+        suggestPlayers={suggestPlayers}
         teamCount={scoreColumns.length}
       />
     </>
@@ -1157,6 +1226,27 @@ const styles = StyleSheet.create({
     borderRadius: 13,
     alignItems: "center",
     justifyContent: "center",
+  },
+  suggestionsList: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 10,
+  },
+  suggestionChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    maxWidth: "100%",
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  suggestionChipText: {
+    flexShrink: 1,
+    fontSize: 13,
+    fontWeight: "700",
   },
   submitButtonDisabled: {
     opacity: 0.55,

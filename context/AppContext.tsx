@@ -1,8 +1,11 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, {
   createContext,
   ReactNode,
   useCallback,
+  useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import type { AlarmId } from "../config/alarms";
@@ -33,6 +36,24 @@ export interface ThemeColors {
 
 export type ThemeMode = "light" | "dark";
 
+export interface PlayerNameUsage {
+  name: string;
+  count: number;
+  lastUsedAt: number;
+}
+
+type PlayerNameHistory = Record<string, PlayerNameUsage>;
+
+const PLAYER_NAME_HISTORY_KEY = "playerNameHistory";
+
+export function normalizePlayerName(name: string): string {
+  return name
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
 export interface AppContextValue {
   counter: number;
   incrementCounter: () => void;
@@ -54,6 +75,11 @@ export interface AppContextValue {
   ) => boolean;
   removeParticipant: (teamName: string, participantName: string) => void;
   reorderParticipants: (teamName: string, newOrder: string[]) => void;
+  getPlayerSuggestions: (
+    query: string,
+    exclude?: string[],
+    limit?: number,
+  ) => string[];
   themeMode: ThemeMode;
   colors: ThemeColors;
   toggleTheme: () => void;
@@ -123,6 +149,74 @@ export function AppProvider({ children }: AppProviderProps) {
     useState<AlarmId>(DEFAULT_ALARM_ID);
   const [secondaryTimerSeconds, setSecondaryTimerSeconds] =
     useState<number>(15);
+  const [playerNameHistory, setPlayerNameHistory] =
+    useState<PlayerNameHistory>({});
+  const playerNameHistoryLoaded = useRef(false);
+
+  useEffect(() => {
+    AsyncStorage.getItem(PLAYER_NAME_HISTORY_KEY)
+      .then((stored) => {
+        if (!stored) return;
+        const parsed: PlayerNameHistory = JSON.parse(stored);
+        // Names recorded before loading finished win over stored ones.
+        setPlayerNameHistory((current) => ({ ...parsed, ...current }));
+      })
+      .catch(() => {})
+      .finally(() => {
+        playerNameHistoryLoaded.current = true;
+      });
+  }, []);
+
+  useEffect(() => {
+    if (!playerNameHistoryLoaded.current) return;
+    AsyncStorage.setItem(
+      PLAYER_NAME_HISTORY_KEY,
+      JSON.stringify(playerNameHistory),
+    ).catch(() => {});
+  }, [playerNameHistory]);
+
+  const recordPlayerName = useCallback((name: string) => {
+    const trimmed = name.trim();
+    const key = normalizePlayerName(trimmed);
+    if (!key) return;
+    setPlayerNameHistory((prev) => ({
+      ...prev,
+      [key]: {
+        name: trimmed,
+        count: (prev[key]?.count ?? 0) + 1,
+        lastUsedAt: Date.now(),
+      },
+    }));
+  }, []);
+
+  const getPlayerSuggestions = useCallback(
+    (query: string, exclude: string[] = [], limit = 5) => {
+      const normalizedQuery = normalizePlayerName(query);
+      if (!normalizedQuery) return [];
+
+      const excluded = new Set(exclude.map(normalizePlayerName));
+
+      return Object.entries(playerNameHistory)
+        .filter(
+          ([key]) =>
+            key !== normalizedQuery &&
+            !excluded.has(key) &&
+            key.includes(normalizedQuery),
+        )
+        .sort(([keyA, a], [keyB, b]) => {
+          const prefixA = keyA.startsWith(normalizedQuery) ? 0 : 1;
+          const prefixB = keyB.startsWith(normalizedQuery) ? 0 : 1;
+          return (
+            prefixA - prefixB ||
+            b.count - a.count ||
+            b.lastUsedAt - a.lastUsedAt
+          );
+        })
+        .slice(0, limit)
+        .map(([, usage]) => usage.name);
+    },
+    [playerNameHistory],
+  );
 
   const colors = useMemo(
     () => (themeMode === "light" ? lightTheme : darkTheme),
@@ -300,9 +394,11 @@ export function AppProvider({ children }: AppProviderProps) {
         };
       });
 
+      recordPlayerName(trimmedParticipantName);
+
       return wasAdded;
     },
-    [],
+    [recordPlayerName],
   );
 
   const updateParticipant = useCallback(
@@ -343,9 +439,15 @@ export function AppProvider({ children }: AppProviderProps) {
         };
       });
 
+      if (
+        normalizePlayerName(currentParticipant) !== normalizePlayerName(next)
+      ) {
+        recordPlayerName(next);
+      }
+
       return true;
     },
-    [participantsByTeam],
+    [participantsByTeam, recordPlayerName],
   );
 
   const removeParticipant = useCallback(
@@ -389,6 +491,7 @@ export function AppProvider({ children }: AppProviderProps) {
       updateParticipant,
       removeParticipant,
       reorderParticipants,
+      getPlayerSuggestions,
       themeMode,
       colors,
       toggleTheme,
@@ -414,6 +517,7 @@ export function AppProvider({ children }: AppProviderProps) {
       updateParticipant,
       removeParticipant,
       reorderParticipants,
+      getPlayerSuggestions,
       themeMode,
       colors,
       toggleTheme,
