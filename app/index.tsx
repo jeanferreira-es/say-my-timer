@@ -23,7 +23,9 @@ import React, {
   useState,
 } from "react";
 import {
+  Modal,
   Platform,
+  Pressable,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -45,6 +47,8 @@ const START_SOUND = require("../assets/audio/start.wav");
 const ALARM_VIBRATION_PATTERN = [0, 300, 100, 300, 100, 500];
 
 const DURATION_MS = 400;
+const DOUBLE_TAP_MS = 350;
+const REWIND_MS = 500;
 const PRIMARY_TIMER_SECONDS = 30;
 
 function buildInterleavedPlayers(
@@ -87,6 +91,7 @@ interface TimerCircleProps {
   expanded: boolean;
   onRunningChange?: (timerId: TimerId, isRunning: boolean) => void;
   onPressAction?: () => void;
+  onDoubleTap?: () => void;
   colors: ThemeColors;
 }
 
@@ -101,6 +106,7 @@ const TimerCircle = forwardRef<TimerCircleRef, TimerCircleProps>(
       expanded,
       onRunningChange,
       onPressAction,
+      onDoubleTap,
       colors,
     },
     ref,
@@ -111,6 +117,8 @@ const TimerCircle = forwardRef<TimerCircleRef, TimerCircleProps>(
     const widthScale = useSharedValue(1);
     const borderProgress = useSharedValue(0);
     const prevRunningRef = useRef(false);
+    const lastPauseTapRef = useRef(0);
+    const rewindUntilRef = useRef(0);
 
     useEffect(() => {
       if (!running) return;
@@ -161,6 +169,25 @@ const TimerCircle = forwardRef<TimerCircleRef, TimerCircleProps>(
       borderProgress.value = withTiming(0, { duration: 300 });
     }, [seconds, onRunningChange, timerId, widthScale, borderProgress]);
 
+    // Finaliza o timer: zera o estado e retrocede o anel até o início
+    const finish = useCallback(() => {
+      cancelAnimation(borderProgress);
+      cancelAnimation(widthScale);
+      lastPauseTapRef.current = 0;
+      rewindUntilRef.current = Date.now() + REWIND_MS;
+      setRemaining(seconds);
+      setRunning(false);
+      onRunningChange?.(timerId, false);
+      widthScale.value = withTiming(1, {
+        duration: DURATION_MS,
+        easing: Easing.out(Easing.cubic),
+      });
+      borderProgress.value = withTiming(0, {
+        duration: REWIND_MS,
+        easing: Easing.out(Easing.cubic),
+      });
+    }, [seconds, onRunningChange, timerId, widthScale, borderProgress]);
+
     const pause = useCallback(() => {
       cancelAnimation(borderProgress);
       setRunning(false);
@@ -183,6 +210,20 @@ const TimerCircle = forwardRef<TimerCircleRef, TimerCircleProps>(
     );
 
     const toggle = () => {
+      // Primeiro toque pausa; segundo toque logo em seguida finaliza o timer
+      const now = Date.now();
+      // Ignora toques enquanto o anel retrocede, para não reiniciar no meio da animação
+      if (now < rewindUntilRef.current) return;
+      if (
+        onDoubleTap &&
+        remaining > 0 &&
+        now - lastPauseTapRef.current < DOUBLE_TAP_MS
+      ) {
+        finish();
+        onDoubleTap();
+        return;
+      }
+      lastPauseTapRef.current = onDoubleTap && running ? now : 0;
       onPressAction?.();
       if (remaining <= 0) reset();
       else {
@@ -308,6 +349,75 @@ const TimerCircle = forwardRef<TimerCircleRef, TimerCircleProps>(
   },
 );
 
+interface ConfirmDialogProps {
+  visible: boolean;
+  title: string;
+  message: string;
+  confirmLabel: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  colors: ThemeColors;
+}
+
+function ConfirmDialog({
+  visible,
+  title,
+  message,
+  confirmLabel,
+  onConfirm,
+  onCancel,
+  colors,
+}: ConfirmDialogProps) {
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      statusBarTranslucent
+      onRequestClose={onCancel}
+    >
+      <View style={styles.dialogOverlay}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onCancel} />
+        <View
+          style={[
+            styles.dialogCard,
+            { backgroundColor: colors.modalBackground, borderColor: colors.border },
+          ]}
+        >
+          <Text style={[styles.dialogTitle, { color: colors.text }]}>
+            {title}
+          </Text>
+          <Text style={[styles.dialogMessage, { color: colors.textSecondary }]}>
+            {message}
+          </Text>
+          <View style={styles.dialogActions}>
+            <TouchableOpacity
+              onPress={onCancel}
+              activeOpacity={0.8}
+              style={[styles.dialogButton, { backgroundColor: colors.surface }]}
+            >
+              <Text style={[styles.dialogButtonText, { color: colors.text }]}>
+                Cancelar
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={onConfirm}
+              activeOpacity={0.85}
+              style={[styles.dialogButton, { backgroundColor: colors.primary }]}
+            >
+              <Text
+                style={[styles.dialogButtonText, { color: colors.background }]}
+              >
+                {confirmLabel}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export default function HomeScreen() {
   const router = useRouter();
   const {
@@ -322,6 +432,8 @@ export default function HomeScreen() {
   const [expandedTimer, setExpandedTimer] = useState<TimerId | null>(null);
   const [isAlarmPlaying, setIsAlarmPlaying] = useState<boolean>(false);
   const [currentPlayerIndex, setCurrentPlayerIndex] = useState(0);
+  const [isRestartOrderConfirmOpen, setIsRestartOrderConfirmOpen] =
+    useState(false);
   const timer30Ref = useRef<TimerCircleRef>(null);
   const timer15Ref = useRef<TimerCircleRef>(null);
   const alarmSoundRef = useRef<AudioPlayer | null>(null);
@@ -334,6 +446,11 @@ export default function HomeScreen() {
     orderedPlayerList.length > 0
       ? orderedPlayerList[currentPlayerIndex % orderedPlayerList.length]
       : null;
+  // expandedTimer só fica definido enquanto algum timer está rodando
+  const isRestartOrderDisabled =
+    orderedPlayerList.length === 0 ||
+    expandedTimer !== null ||
+    currentPlayerIndex % orderedPlayerList.length === 0;
 
   const handleRestartTimers = useCallback(() => {
     setExpandedTimer(null);
@@ -370,6 +487,16 @@ export default function HomeScreen() {
       setIsAlarmPlaying(false);
     }
   }, []);
+
+  // Volta a vez para o primeiro jogador do primeiro time, seguindo a ordem da tela de times
+  const handleRestartOrder = useCallback(() => {
+    setIsRestartOrderConfirmOpen(false);
+    setExpandedTimer(null);
+    setCurrentPlayerIndex(0);
+    timer30Ref.current?.reset();
+    timer15Ref.current?.reset();
+    void stopAlarm();
+  }, [stopAlarm]);
 
   const playAlarm = useCallback(async () => {
     const source = ALARM_SOUNDS[selectedAlarmId] ?? ALARM_SOUNDS.alarm2;
@@ -438,6 +565,14 @@ export default function HomeScreen() {
     timer30Ref.current?.reset();
     timer30Ref.current?.start();
   }, [playStartSound]);
+
+  const handleFinishTurn = useCallback(() => {
+    timer15Ref.current?.reset();
+    setExpandedTimer(null);
+    setCurrentPlayerIndex((i) =>
+      orderedPlayerList.length > 0 ? (i + 1) % orderedPlayerList.length : 0,
+    );
+  }, [orderedPlayerList.length]);
 
   const handle30sComplete = useCallback(() => {
     playAlarm();
@@ -532,6 +667,16 @@ export default function HomeScreen() {
       <View style={styles.timersRow}>
         <View style={styles.timerControlsRow}>
           <TouchableOpacity
+            onPress={() => setIsRestartOrderConfirmOpen(true)}
+            activeOpacity={0.8}
+            disabled={isRestartOrderDisabled}
+            style={[
+              isRestartOrderDisabled && styles.timerControlButtonDisabled,
+            ]}
+          >
+            <Ionicons name="play-skip-back" size={30} color={colors.text} />
+          </TouchableOpacity>
+          <TouchableOpacity
             onPress={handlePreviousPlayer}
             activeOpacity={0.8}
             disabled={orderedPlayerList.length === 0}
@@ -564,6 +709,7 @@ export default function HomeScreen() {
             timer15Ref.current?.reset();
             void stopAlarm();
           }}
+          onDoubleTap={handleFinishTurn}
           colors={colors}
         />
         <View style={styles.secondaryTimerRow}>
@@ -608,6 +754,16 @@ export default function HomeScreen() {
       >
         <FontAwesome6 name="chess-knight" size={22} color={colors.background} />
       </TouchableOpacity>
+
+      <ConfirmDialog
+        visible={isRestartOrderConfirmOpen}
+        title="Reiniciar ordem?"
+        message={`A vez volta para ${orderedPlayerList[0] ?? "o primeiro jogador"}, o primeiro da ordem definida em Times.`}
+        confirmLabel="Reiniciar"
+        onConfirm={handleRestartOrder}
+        onCancel={() => setIsRestartOrderConfirmOpen(false)}
+        colors={colors}
+      />
     </View>
   );
 }
@@ -698,6 +854,45 @@ const styles = StyleSheet.create({
   },
   timerControlButtonDisabled: {
     opacity: 0.5,
+  },
+  dialogOverlay: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 32,
+    backgroundColor: "rgba(0, 0, 0, 0.45)",
+  },
+  dialogCard: {
+    width: "100%",
+    maxWidth: 340,
+    borderRadius: 24,
+    borderWidth: 1,
+    padding: 24,
+  },
+  dialogTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+  },
+  dialogMessage: {
+    fontSize: 15,
+    lineHeight: 22,
+    marginTop: 8,
+  },
+  dialogActions: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 24,
+  },
+  dialogButton: {
+    flex: 1,
+    height: 44,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dialogButtonText: {
+    fontSize: 15,
+    fontWeight: "800",
   },
   stopAlarmButtonBase: {
     paddingHorizontal: 28,

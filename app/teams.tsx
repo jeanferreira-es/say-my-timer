@@ -13,6 +13,8 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  type ScrollViewInstance,
+  type TextInputInstance,
 } from "react-native";
 import {
   NestableDraggableFlatList,
@@ -132,7 +134,7 @@ function AddTeamModal({
   const [teamName, setTeamName] = useState(() => nextDefaultTeamName(teamCount));
   const [playerName, setPlayerName] = useState("");
   const [players, setPlayers] = useState<string[]>([]);
-  const playerInputRef = useRef<TextInput>(null);
+  const playerInputRef = useRef<TextInputInstance>(null);
   const keyboardOffset = useKeyboardOffset();
 
   useEffect(() => {
@@ -199,13 +201,27 @@ function AddTeamModal({
               <Text style={[styles.modalTitle, { color: colors.text }]}>
                 Novo time
               </Text>
-              <TouchableOpacity
-                onPress={onClose}
-                activeOpacity={0.8}
-                style={[styles.modalCloseButton, { backgroundColor: colors.surface }]}
-              >
-                <Ionicons name="close" size={18} color={colors.text} />
-              </TouchableOpacity>
+              <View style={styles.modalHeaderActions}>
+                <TouchableOpacity
+                  onPress={onClose}
+                  activeOpacity={0.8}
+                  style={[styles.modalCloseButton, { backgroundColor: colors.surface }]}
+                >
+                  <Ionicons name="close" size={18} color={colors.text} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={addTeam}
+                  activeOpacity={0.85}
+                  disabled={!trimmedTeamName}
+                  style={[
+                    styles.modalCloseButton,
+                    { backgroundColor: colors.primary },
+                    !trimmedTeamName && styles.submitButtonDisabled,
+                  ]}
+                >
+                  <Ionicons name="checkmark" size={18} color={colors.background} />
+                </TouchableOpacity>
+              </View>
             </View>
 
             <ScrollView
@@ -292,23 +308,6 @@ function AddTeamModal({
                 </TouchableOpacity>
               </View>
             </ScrollView>
-
-            <TouchableOpacity
-              onPress={addTeam}
-              activeOpacity={0.85}
-              style={[
-                styles.submitButton,
-                { backgroundColor: colors.primary },
-                !trimmedTeamName && styles.submitButtonDisabled,
-              ]}
-              disabled={!trimmedTeamName}
-            >
-              <Text
-                style={[styles.submitButtonText, { color: colors.background }]}
-              >
-                Adicionar
-              </Text>
-            </TouchableOpacity>
           </View>
         </Animated.View>
       </View>
@@ -353,7 +352,7 @@ function  TeamCard({
   const [teamDraft, setTeamDraft] = useState(team);
   const [playerDrafts, setPlayerDrafts] = useState(participants);
   const [newPlayerName, setNewPlayerName] = useState("");
-  const newPlayerInputRef = useRef<TextInput>(null);
+  const newPlayerInputRef = useRef<TextInputInstance>(null);
 
   const canMoveLeft = totalTeams > 1 && teamIndex > 0;
   const canMoveRight = totalTeams > 1 && teamIndex < totalTeams - 1;
@@ -488,7 +487,7 @@ function  TeamCard({
             >
               Nenhum jogador adicionado
             </Text>
-          ) : null
+          ) : undefined
         }
         renderItem={({
           item: participant,
@@ -667,7 +666,7 @@ function TeamsPreview({
   participantsByTeam,
   teams,
 }: TeamsPreviewProps) {
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
   const previousTeamsCountRef = useRef(teams.length);
 
   useEffect(() => {
@@ -1082,6 +1081,11 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: "800",
   },
+  modalHeaderActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   modalCloseButton: {
     width: 32,
     height: 32,
@@ -1154,18 +1158,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  submitButton: {
-    height: 37,
-    marginTop: 9,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-  },
   submitButtonDisabled: {
     opacity: 0.55,
-  },
-  submitButtonText: {
-    fontSize: 15,
-    fontWeight: "800",
   },
 });
