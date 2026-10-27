@@ -1,32 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <defs>
-    <radialGradient id="bg" cx="50%" cy="38%" r="75%">
-      <stop offset="0" stop-color="#03314A"/>
-      <stop offset="1" stop-color="#00131D"/>
-    </radialGradient>
-  </defs>
+  <rect id="background" width="1024" height="1024" fill="#072636"/>
 
-  <rect id="background" width="1024" height="1024" fill="url(#bg)"/>
-
-  <!-- Stopwatch -->
-  <g id="mark" transform="translate(0 8)">
+  <!-- Stopwatch with a question mark, scaled to 80% and centered to keep a margin -->
+  <g id="mark" transform="translate(512 512) scale(0.8) translate(-512 -525)">
     <!-- crown -->
-    <rect x="484" y="214" width="56" height="70" fill="#FFFFFF"/>
-    <rect x="428" y="170" width="168" height="62" rx="31" fill="#FFFFFF"/>
+    <rect x="484" y="226" width="56" height="70" fill="#FFFFFF"/>
+    <rect x="437" y="170" width="150" height="64" rx="32" fill="#FFFFFF"/>
     <!-- side button -->
-    <rect x="703" y="300" width="84" height="48" rx="20" fill="#DE2C6E" transform="rotate(45 745 324)"/>
+    <rect x="732" y="304" width="84" height="48" rx="24" fill="#DE2C6E" transform="rotate(45 774 328)"/>
 
     <!-- body -->
-    <circle cx="512" cy="548" r="290" fill="#FFFFFF"/>
+    <circle cx="512" cy="580" r="300" fill="#FFFFFF"/>
 
     <!-- dial -->
-    <circle cx="512" cy="548" r="236" fill="#00131D"/>
-    <circle cx="512" cy="548" r="182" fill="none" stroke="#00AAB7" stroke-width="44"/>
-    <path d="M512 366 A182 182 0 0 1 669.6 639" fill="none" stroke="#DE2C6E" stroke-width="44" stroke-linecap="round"/>
+    <circle cx="512" cy="580" r="246" fill="#011521"/>
+    <circle cx="512" cy="580" r="200" fill="none" stroke="#03AAB6" stroke-width="42"/>
+    <path d="M512 380 A200 200 0 0 1 685.2 680" fill="none" stroke="#DE2C6E" stroke-width="42" stroke-linecap="round"/>
 
-    <!-- hand -->
-    <line x1="512" y1="548" x2="623" y2="612" stroke="#FFFFFF" stroke-width="30" stroke-linecap="round"/>
-    <circle cx="512" cy="548" r="34" fill="#FFFFFF"/>
-    <circle cx="512" cy="548" r="13" fill="#DE2C6E"/>
+    <!-- question mark -->
+    <path d="M466 520 C466 485 488 468 514 468 C552 468 578 490 578 524 C578 560 552 578 516 580 L516 600 L470 600 L468 548 C510 548 530 544 530 526 C530 514 522 508 512 508 C500 508 492 514 492 528 Z" fill="#FFFFFF"/>
+    <rect x="462" y="616" width="64" height="56" rx="28" fill="#FFFFFF"/>
   </g>
 </svg>

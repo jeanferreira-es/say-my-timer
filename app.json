@@ -12,7 +12,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#00131D",
+        "backgroundColor": "#072636",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -43,7 +43,7 @@
         {
           "image": "./assets/images/splash-icon.png",
           "resizeMode": "contain",
-          "backgroundColor": "#00131D",
+          "backgroundColor": "#072636",
           "imageWidth": 200
         }
       ]
@@ -52,11 +52,15 @@
       "typedRoutes": true
     },
     "extra": {
-      "router": {},
+      "router": {
+        "asyncRoutes": {
+          "web": true
+        }
+      },
       "eas": {
-        "projectId": "59bd873b-db53-4275-8c44-3748aed42f79"
+        "projectId": "bf5d7739-f683-415f-a65e-dea95c62cc8a"
       }
     },
-    "owner": "jeanferreira"
+    "owner": "ferracy"
   }
 }

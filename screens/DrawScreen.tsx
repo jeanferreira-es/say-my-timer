@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { createAudioPlayer, setAudioModeAsync } from "expo-audio";
 import { useRouter } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   GestureResponderEvent,
@@ -66,7 +66,7 @@ function TouchCircle({
 }: {
   x: number;
   y: number;
-  color: string;
+  color: string; 
   size?: number;
   showRing?: boolean;
 }) {
