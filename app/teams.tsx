@@ -24,23 +24,30 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { type ThemeColors, useApp } from "@/context/AppContext";
+import { getActiveTeams } from "@/utils/turnOrder";
+import {
+  findPlayerTeam,
+  nextDefaultTeamName,
+  sameName,
+} from "@/utils/teamRules";
 
 interface ThemedComponentProps {
   colors: ThemeColors;
 }
 
 interface HeaderActionProps extends ThemedComponentProps {
+  icon: "dice" | "user-group";
   onPress: () => void;
 }
 
-function HeaderAction({ colors, onPress }: HeaderActionProps) {
+function HeaderAction({ colors, icon, onPress }: HeaderActionProps) {
   return (
     <TouchableOpacity
       activeOpacity={0.8}
       onPress={onPress}
       style={[styles.headerAction, { backgroundColor: colors.surface }]}
     >
-      <FontAwesome6 name="dice" size={30} color={colors.text} />
+      <FontAwesome6 name={icon} size={24} color={colors.text} />
     </TouchableOpacity>
   );
 }
@@ -79,6 +86,15 @@ function AddTeamTrigger({ colors, onPress }: AddTeamTriggerProps) {
 }
 
 type SuggestPlayers = (query: string, exclude: string[]) => string[];
+// Time em que o jogador já está (ignorando `exceptTeam`), ou null.
+type FindPlayerTeam = (playerName: string, exceptTeam?: string) => string | null;
+
+function FormError({ colors, message }: ThemedComponentProps & { message: string | null }) {
+  if (!message) return null;
+  return (
+    <Text style={[styles.formError, { color: colors.accent }]}>{message}</Text>
+  );
+}
 
 interface PlayerSuggestionsProps extends ThemedComponentProps {
   suggestions: string[];
@@ -114,16 +130,67 @@ function PlayerSuggestions({
   );
 }
 
+interface RosterPickerProps extends ThemedComponentProps {
+  players: string[];
+  onSelect: (playerName: string) => void;
+  onManageRoster: () => void;
+}
+
+function RosterPicker({
+  colors,
+  onManageRoster,
+  onSelect,
+  players,
+}: RosterPickerProps) {
+  return (
+    <View style={styles.rosterSection}>
+      <View style={styles.rosterHeader}>
+        <Text style={[styles.rosterTitle, { color: colors.textSecondary }]}>
+          Jogadores cadastrados
+        </Text>
+        <TouchableOpacity onPress={onManageRoster} activeOpacity={0.7}>
+          <Text style={[styles.rosterManage, { color: colors.primary }]}>
+            Gerenciar
+          </Text>
+        </TouchableOpacity>
+      </View>
+      {players.length === 0 ? (
+        <Text style={[styles.rosterEmpty, { color: colors.textTertiary }]}>
+          Nenhum jogador disponível
+        </Text>
+      ) : (
+        <View style={styles.suggestionsList}>
+          {players.map((player) => (
+            <TouchableOpacity
+              key={player}
+              onPress={() => onSelect(player)}
+              activeOpacity={0.8}
+              style={[styles.rosterChip, { backgroundColor: colors.surface }]}
+            >
+              <Ionicons name="add" size={14} color={colors.primary} />
+              <Text
+                numberOfLines={1}
+                style={[styles.suggestionChipText, { color: colors.text }]}
+              >
+                {player}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
 interface AddTeamModalProps extends ThemedComponentProps {
   visible: boolean;
   onClose: () => void;
-  onAddTeam: (teamName: string, players: string[]) => void;
+  onAddTeam: (teamName: string, players: string[]) => string | null;
+  onManageRoster: () => void;
+  findTeamOfPlayer: FindPlayerTeam;
+  rosterPlayers: string[];
   suggestPlayers: SuggestPlayers;
-  teamCount: number;
-}
-
-function nextDefaultTeamName(teamCount: number): string {
-  return `Time ${String(teamCount + 1).padStart(2, "0")}`;
+  teamNames: string[];
 }
 
 function useKeyboardOffset() {
@@ -163,36 +230,53 @@ function useKeyboardOffset() {
 
 function AddTeamModal({
   colors,
+  findTeamOfPlayer,
   onAddTeam,
   onClose,
+  onManageRoster,
+  rosterPlayers,
   suggestPlayers,
-  teamCount,
+  teamNames,
   visible,
 }: AddTeamModalProps) {
-  const [teamName, setTeamName] = useState(() => nextDefaultTeamName(teamCount));
+  const [teamName, setTeamName] = useState(() => nextDefaultTeamName(teamNames));
   const [playerName, setPlayerName] = useState("");
   const [players, setPlayers] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const playerInputRef = useRef<TextInputInstance>(null);
   const keyboardOffset = useKeyboardOffset();
 
+  // Só reinicia o formulário ao abrir o modal.
+  const teamNamesRef = useRef(teamNames);
+  teamNamesRef.current = teamNames;
   useEffect(() => {
     if (visible) {
-      setTeamName(nextDefaultTeamName(teamCount));
+      setTeamName(nextDefaultTeamName(teamNamesRef.current));
       setPlayerName("");
       setPlayers([]);
+      setError(null);
     }
-  }, [visible, teamCount]);
+  }, [visible]);
 
   const trimmedTeamName = teamName.trim();
   const playerSuggestions = suggestPlayers(playerName, players);
+  const availableRosterPlayers = rosterPlayers.filter(
+    (rosterPlayer) => !players.some((player) => sameName(player, rosterPlayer)),
+  );
 
   const addDraftPlayer = (name: string) => {
     const trimmedPlayerName = name.trim();
     if (!trimmedPlayerName) return;
-    const alreadyExists = players.some(
-      (player) => player.toLowerCase() === trimmedPlayerName.toLowerCase(),
-    );
-    if (alreadyExists) return;
+    if (players.some((player) => sameName(player, trimmedPlayerName))) {
+      setError(`${trimmedPlayerName} já está neste time`);
+      return;
+    }
+    const otherTeam = findTeamOfPlayer(trimmedPlayerName);
+    if (otherTeam) {
+      setError(`${trimmedPlayerName} já está no time ${otherTeam}`);
+      return;
+    }
+    setError(null);
     setPlayers((current) => [...current, trimmedPlayerName]);
     setPlayerName("");
     playerInputRef.current?.focus();
@@ -204,7 +288,11 @@ function AddTeamModal({
 
   const addTeam = () => {
     if (!trimmedTeamName) return;
-    onAddTeam(trimmedTeamName, players);
+    const addError = onAddTeam(trimmedTeamName, players);
+    if (addError) {
+      setError(addError);
+      return;
+    }
     onClose();
   };
 
@@ -268,9 +356,13 @@ function AddTeamModal({
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
             >
+              <FormError colors={colors} message={error} />
               <TextInput
                 value={teamName}
-                onChangeText={setTeamName}
+                onChangeText={(value) => {
+                  setTeamName(value);
+                  setError(null);
+                }}
                 placeholder="Digite o nome do time"
                 placeholderTextColor={colors.placeholder}
                 returnKeyType="next"
@@ -351,6 +443,12 @@ function AddTeamModal({
                 suggestions={playerSuggestions}
                 onSelect={addDraftPlayer}
               />
+              <RosterPicker
+                colors={colors}
+                players={availableRosterPlayers}
+                onSelect={addDraftPlayer}
+                onManageRoster={onManageRoster}
+              />
             </ScrollView>
           </View>
         </Animated.View>
@@ -364,29 +462,34 @@ interface TeamCardProps extends ThemedComponentProps {
   teamIndex: number;
   totalTeams: number;
   participants: string[];
-  onAddParticipant: (teamName: string, participantName: string) => boolean;
+  findTeamOfPlayer: FindPlayerTeam;
   onMoveTeam: (teamIndex: number, direction: "left" | "right") => void;
-  onRemoveParticipant: (teamName: string, participantName: string) => void;
   onRemoveTeam: (teamName: string) => void;
-  onRenameTeam: (teamName: string, nextName: string) => boolean;
+  onRenameTeam: (teamName: string, nextName: string) => string | null;
   onReorderParticipants: (teamName: string, newOrder: string[]) => void;
-  onUpdateParticipant: (
-    teamName: string,
-    participantIndex: number,
-    nextName: string,
-  ) => boolean;
+  onSaveParticipants: (teamName: string, players: string[]) => string | null;
   suggestPlayers: SuggestPlayers;
 }
 
-function  TeamCard({
+// Linha da lista de jogadores. O id é estável enquanto o nome é editado,
+// para o campo de texto não ser recriado (e perder o foco) a cada tecla.
+interface PlayerItem {
+  id: string;
+  name: string;
+}
+
+let nextDraftId = 0;
+const toDraftItems = (names: string[]): PlayerItem[] =>
+  names.map((name) => ({ id: `draft-${nextDraftId++}`, name }));
+
+function TeamCard({
   colors,
-  onAddParticipant,
+  findTeamOfPlayer,
   onMoveTeam,
-  onRemoveParticipant,
   onRemoveTeam,
   onRenameTeam,
   onReorderParticipants,
-  onUpdateParticipant,
+  onSaveParticipants,
   participants,
   suggestPlayers,
   team,
@@ -396,54 +499,75 @@ function  TeamCard({
   const [editingTeam, setEditingTeam] = useState(false);
   const [editingPlayers, setEditingPlayers] = useState(false);
   const [teamDraft, setTeamDraft] = useState(team);
-  const [playerDrafts, setPlayerDrafts] = useState(participants);
+  const [playerDrafts, setPlayerDrafts] = useState<PlayerItem[]>([]);
   const [newPlayerName, setNewPlayerName] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const newPlayerInputRef = useRef<TextInputInstance>(null);
 
   const canMoveLeft = totalTeams > 1 && teamIndex > 0;
   const canMoveRight = totalTeams > 1 && teamIndex < totalTeams - 1;
+  const draftNames = playerDrafts.map((item) => item.name);
+  const listItems: PlayerItem[] = editingPlayers
+    ? playerDrafts
+    : participants.map((name) => ({ id: `saved-${name}`, name }));
 
   const beginTeamEdit = () => {
     setTeamDraft(team);
+    setError(null);
     setEditingTeam(true);
   };
 
   const saveTeamName = () => {
-    if (onRenameTeam(team, teamDraft)) {
-      setEditingTeam(false);
-    }
+    const renameError = onRenameTeam(team, teamDraft);
+    setError(renameError);
+    if (!renameError) setEditingTeam(false);
   };
 
-  const togglePlayerEdit = () => {
-    setPlayerDrafts(participants);
-    setEditingPlayers((current) => !current);
+  const beginPlayerEdit = () => {
+    setPlayerDrafts(toDraftItems(participants));
+    setNewPlayerName("");
+    setError(null);
+    setEditingPlayers(true);
   };
 
+  // Nada é aplicado ao time antes de salvar: renomear, remover, adicionar e
+  // reordenar são validados e gravados juntos.
   const savePlayerDrafts = () => {
-    playerDrafts.forEach((playerName, index) => {
-      onUpdateParticipant(team, index, playerName);
-    });
-    setEditingPlayers(false);
+    const saveError = onSaveParticipants(team, draftNames);
+    setError(saveError);
+    if (!saveError) setEditingPlayers(false);
   };
 
   const playerSuggestions = editingPlayers
-    ? suggestPlayers(newPlayerName, playerDrafts).slice(0, 3)
+    ? suggestPlayers(newPlayerName, draftNames).slice(0, 3)
     : [];
 
   const addPlayer = (name: string) => {
-    if (onAddParticipant(team, name)) {
-      setNewPlayerName("");
-      setPlayerDrafts((current) => [...current, name.trim()]);
-      newPlayerInputRef.current?.focus();
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    if (draftNames.some((player) => sameName(player, trimmed))) {
+      setError(`${trimmed} já está neste time`);
+      return;
     }
+    const otherTeam = findTeamOfPlayer(trimmed, team);
+    if (otherTeam) {
+      setError(`${trimmed} já está no time ${otherTeam}`);
+      return;
+    }
+    setError(null);
+    setNewPlayerName("");
+    setPlayerDrafts((current) => [...current, ...toDraftItems([trimmed])]);
+    newPlayerInputRef.current?.focus();
   };
 
-  const updatePlayerDraft = (participantIndex: number, value: string) => {
+  const updatePlayerDraft = (id: string, value: string) => {
     setPlayerDrafts((current) =>
-      current.map((player, index) =>
-        index === participantIndex ? value : player,
-      ),
+      current.map((item) => (item.id === id ? { ...item, name: value } : item)),
     );
+  };
+
+  const removePlayerDraft = (id: string) => {
+    setPlayerDrafts((current) => current.filter((item) => item.id !== id));
   };
 
   return (
@@ -493,7 +617,7 @@ function  TeamCard({
           </TouchableOpacity>
           <TouchableOpacity
             activeOpacity={0.8}
-            onPress={editingPlayers ? savePlayerDrafts : togglePlayerEdit}
+            onPress={editingPlayers ? savePlayerDrafts : beginPlayerEdit}
             style={[styles.teamActionButton, { backgroundColor: colors.surface }]}
           >
             <Ionicons
@@ -512,11 +636,11 @@ function  TeamCard({
         </View>
       </View>
 
+      <FormError colors={colors} message={error} />
+
       <NestableDraggableFlatList
-        data={editingPlayers ? playerDrafts : participants}
-        keyExtractor={(participant, participantIndex) =>
-          `${team}-${participantIndex}-${participant}`
-        }
+        data={listItems}
+        keyExtractor={(item) => item.id}
         style={styles.participantsCardList}
         contentContainerStyle={styles.participantsCardListContent}
         activationDistance={12}
@@ -527,7 +651,7 @@ function  TeamCard({
           if (editingPlayers) {
             setPlayerDrafts(data);
           } else {
-            onReorderParticipants(team, data);
+            onReorderParticipants(team, data.map((item) => item.name));
           }
         }}
         ListEmptyComponent={
@@ -539,13 +663,8 @@ function  TeamCard({
             </Text>
           ) : undefined
         }
-        renderItem={({
-          item: participant,
-          getIndex,
-          drag,
-          isActive,
-        }: RenderItemParams<string>) => {
-          const participantIndex = getIndex() ?? 0;
+        renderItem={({ item, drag, isActive }: RenderItemParams<PlayerItem>) => {
+          const participant = item.name;
           return (
             <View style={[styles.teamPlayerRow, isActive && styles.teamPlayerRowActive]}>
               <TouchableOpacity
@@ -563,9 +682,7 @@ function  TeamCard({
               <>
                 <TextInput
                   value={participant}
-                  onChangeText={(value) =>
-                    updatePlayerDraft(participantIndex, value)
-                  }
+                  onChangeText={(value) => updatePlayerDraft(item.id, value)}
                   placeholder="Nome do jogador"
                   placeholderTextColor={colors.placeholder}
                   returnKeyType="done"
@@ -579,12 +696,7 @@ function  TeamCard({
                 />
                 <TouchableOpacity
                   activeOpacity={0.8}
-                  onPress={() => {
-                    onRemoveParticipant(team, participant);
-                    setPlayerDrafts((current) =>
-                      current.filter((_, index) => index !== participantIndex),
-                    );
-                  }}
+                  onPress={() => removePlayerDraft(item.id)}
                   style={styles.playerDeleteButton}
                 >
                   <Ionicons
@@ -629,7 +741,10 @@ function  TeamCard({
           <TextInput
             ref={newPlayerInputRef}
             value={newPlayerName}
-            onChangeText={setNewPlayerName}
+            onChangeText={(value) => {
+              setNewPlayerName(value);
+              setError(null);
+            }}
             onSubmitEditing={() => addPlayer(newPlayerName)}
             placeholder="Novo jogador"
             placeholderTextColor={colors.placeholder}
@@ -697,29 +812,23 @@ function  TeamCard({
 interface TeamsPreviewProps extends ThemedComponentProps {
   teams: string[];
   participantsByTeam: Record<string, string[]>;
-  onAddParticipant: (teamName: string, participantName: string) => boolean;
+  findTeamOfPlayer: FindPlayerTeam;
   onMoveTeam: (teamIndex: number, direction: "left" | "right") => void;
-  onRemoveParticipant: (teamName: string, participantName: string) => void;
   onRemoveTeam: (teamName: string) => void;
-  onRenameTeam: (teamName: string, nextName: string) => boolean;
+  onRenameTeam: (teamName: string, nextName: string) => string | null;
   onReorderParticipants: (teamName: string, newOrder: string[]) => void;
-  onUpdateParticipant: (
-    teamName: string,
-    participantIndex: number,
-    nextName: string,
-  ) => boolean;
+  onSaveParticipants: (teamName: string, players: string[]) => string | null;
   suggestPlayers: SuggestPlayers;
 }
 
 function TeamsPreview({
   colors,
-  onAddParticipant,
+  findTeamOfPlayer,
   onMoveTeam,
-  onRemoveParticipant,
   onRemoveTeam,
   onRenameTeam,
   onReorderParticipants,
-  onUpdateParticipant,
+  onSaveParticipants,
   participantsByTeam,
   suggestPlayers,
   teams,
@@ -749,13 +858,12 @@ function TeamsPreview({
           <TeamCard
             key={team}
             colors={colors}
-            onAddParticipant={onAddParticipant}
+            findTeamOfPlayer={findTeamOfPlayer}
             onMoveTeam={onMoveTeam}
-            onRemoveParticipant={onRemoveParticipant}
             onRemoveTeam={onRemoveTeam}
             onRenameTeam={onRenameTeam}
             onReorderParticipants={onReorderParticipants}
-            onUpdateParticipant={onUpdateParticipant}
+            onSaveParticipants={onSaveParticipants}
             participants={participants}
             suggestPlayers={suggestPlayers}
             team={team}
@@ -772,18 +880,17 @@ export default function TeamsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const {
-    addParticipantToTeam,
-    addScoreColumn,
+    addTeam,
     colors,
     getPlayerSuggestions,
     moveTeam,
     participantsByTeam,
-    removeParticipant,
     removeScoreColumn,
     renameScoreColumn,
     reorderParticipants,
+    rosterPlayers,
     scoreColumns,
-    updateParticipant,
+    setTeamParticipants,
   } = useApp();
 
   const hasTeams = scoreColumns.length > 0;
@@ -801,17 +908,35 @@ export default function TeamsScreen() {
   );
 
   // Players already in a team are never suggested again.
+  const assignedPlayers = Object.values(participantsByTeam).flat();
   const suggestPlayers: SuggestPlayers = (query, exclude) =>
-    getPlayerSuggestions(query, [
-      ...Object.values(participantsByTeam).flat(),
-      ...exclude,
-    ]);
+    getPlayerSuggestions(query, [...assignedPlayers, ...exclude]);
+  const availableRosterPlayers = rosterPlayers
+    .filter(
+      (rosterPlayer) =>
+        !assignedPlayers.some((player) => sameName(player, rosterPlayer)),
+    )
+    .sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
 
-  const handleAddTeam = (teamName: string, players: string[]) => {
-    const wasAdded = addScoreColumn(teamName);
-    if (!wasAdded) return;
-    players.forEach((player) => addParticipantToTeam(teamName, player));
+  const openRoster = () => {
+    setIsAddTeamModalOpen(false);
+    router.push("/players");
   };
+
+  const findTeamOfPlayer: FindPlayerTeam = (playerName, exceptTeam) =>
+    findPlayerTeam(participantsByTeam, playerName, exceptTeam);
+
+  const emptyTeams = scoreColumns.filter(
+    (team) => (participantsByTeam[team] ?? []).length === 0,
+  );
+  const activeTeamsCount = getActiveTeams(scoreColumns, participantsByTeam).length;
+  const orderWarning = !hasTeams
+    ? null
+    : activeTeamsCount < 2
+      ? "Cadastre pelo menos 2 times com jogadores para alternar as jogadas entre os times."
+      : emptyTeams.length > 0
+        ? `${emptyTeams.join(", ")} sem jogadores: ${emptyTeams.length === 1 ? "fica" : "ficam"} de fora da ordem das jogadas.`
+        : null;
 
   return (
     <>
@@ -846,10 +971,18 @@ export default function TeamsScreen() {
                     {hasTeams ? "Times registrados" : "Nenhum time registrado"}
                   </Text>
                 </View>
-                <HeaderAction
-                  colors={colors}
-                  onPress={() => router.push("/draw")}
-                />
+                <View style={styles.headerActions}>
+                  <HeaderAction
+                    colors={colors}
+                    icon="user-group"
+                    onPress={() => router.push("/players")}
+                  />
+                  <HeaderAction
+                    colors={colors}
+                    icon="dice"
+                    onPress={() => router.push("/draw")}
+                  />
+                </View>
               </View>
 
               {!hasTeams ? (
@@ -857,18 +990,24 @@ export default function TeamsScreen() {
               ) : (
                 <TeamsPreview
                   colors={colors}
-                  onAddParticipant={addParticipantToTeam}
+                  findTeamOfPlayer={findTeamOfPlayer}
                   onMoveTeam={moveTeam}
-                  onRemoveParticipant={removeParticipant}
                   onRemoveTeam={removeScoreColumn}
                   onRenameTeam={renameScoreColumn}
                   onReorderParticipants={reorderParticipants}
-                  onUpdateParticipant={updateParticipant}
+                  onSaveParticipants={setTeamParticipants}
                   teams={scoreColumns}
                   participantsByTeam={participantsByTeam}
                   suggestPlayers={suggestPlayers}
                 />
               )}
+              {orderWarning ? (
+                <Text
+                  style={[styles.orderWarning, { color: colors.textTertiary }]}
+                >
+                  {orderWarning}
+                </Text>
+              ) : null}
             </View>
 
             <AddTeamTrigger
@@ -882,9 +1021,12 @@ export default function TeamsScreen() {
         colors={colors}
         visible={isAddTeamModalOpen}
         onClose={() => setIsAddTeamModalOpen(false)}
-        onAddTeam={handleAddTeam}
+        onAddTeam={addTeam}
+        onManageRoster={openRoster}
+        findTeamOfPlayer={findTeamOfPlayer}
+        rosterPlayers={availableRosterPlayers}
         suggestPlayers={suggestPlayers}
-        teamCount={scoreColumns.length}
+        teamNames={scoreColumns}
       />
     </>
   );
@@ -930,10 +1072,15 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     lineHeight: 34,
   },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   headerAction: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1243,6 +1390,37 @@ const styles = StyleSheet.create({
     paddingHorizontal: 9,
     paddingVertical: 5,
   },
+  rosterSection: {
+    marginTop: 18,
+  },
+  rosterHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  rosterTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    textTransform: "uppercase",
+  },
+  rosterManage: {
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  rosterEmpty: {
+    marginTop: 8,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  rosterChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    maxWidth: "100%",
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
   suggestionChipText: {
     flexShrink: 1,
     fontSize: 13,
@@ -1250,5 +1428,18 @@ const styles = StyleSheet.create({
   },
   submitButtonDisabled: {
     opacity: 0.55,
+  },
+  formError: {
+    marginTop: 6,
+    marginBottom: 6,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  orderWarning: {
+    marginTop: 16,
+    marginHorizontal: 20,
+    fontSize: 13,
+    fontWeight: "600",
+    textAlign: "center",
   },
 });

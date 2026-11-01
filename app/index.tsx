@@ -43,6 +43,16 @@ import Animated, {
 } from "react-native-reanimated";
 import Svg, { Circle } from "react-native-svg";
 
+import {
+  INITIAL_TURN,
+  type Turn,
+  getActiveTeams,
+  getTurnPlayer,
+  isFirstTurn,
+  nextTurn,
+  previousTurn,
+} from "@/utils/turnOrder";
+
 const START_SOUND = require("../assets/audio/start.wav");
 const ALARM_VIBRATION_PATTERN = [0, 300, 100, 300, 100, 500];
 
@@ -50,25 +60,6 @@ const DURATION_MS = 400;
 const DOUBLE_TAP_MS = 350;
 const REWIND_MS = 500;
 const PRIMARY_TIMER_SECONDS = 30;
-
-function buildInterleavedPlayers(
-  teamOrder: string[],
-  participantsByTeam: Record<string, string[]>,
-): string[] {
-  if (!teamOrder.length) return [];
-  const maxRound = Math.max(
-    ...teamOrder.map((team) => (participantsByTeam[team] ?? []).length),
-    0,
-  );
-  const list: string[] = [];
-  for (let round = 0; round < maxRound; round++) {
-    for (const team of teamOrder) {
-      const players = participantsByTeam[team] ?? [];
-      if (players[round] !== undefined) list.push(players[round]);
-    }
-  }
-  return list;
-}
 
 type TimerSize = "large" | "small";
 type TimerSeconds = number;
@@ -88,6 +79,8 @@ interface TimerCircleProps {
   size: TimerSize;
   label: string;
   onComplete?: () => void;
+  // Volta automaticamente ao tempo inicial quando chega a zero
+  resetOnComplete?: boolean;
   expanded: boolean;
   onRunningChange?: (timerId: TimerId, isRunning: boolean) => void;
   onPressAction?: () => void;
@@ -103,6 +96,7 @@ const TimerCircle = forwardRef<TimerCircleRef, TimerCircleProps>(
       size,
       label,
       onComplete,
+      resetOnComplete = false,
       expanded,
       onRunningChange,
       onPressAction,
@@ -119,17 +113,6 @@ const TimerCircle = forwardRef<TimerCircleRef, TimerCircleProps>(
     const prevRunningRef = useRef(false);
     const lastPauseTapRef = useRef(0);
     const rewindUntilRef = useRef(0);
-
-    useEffect(() => {
-      if (!running) return;
-      if (remaining <= 0) {
-        setRunning(false);
-        onComplete?.();
-        return;
-      }
-      const t = setInterval(() => setRemaining((r) => r - 1), 1000);
-      return () => clearInterval(t);
-    }, [running, remaining, onComplete]);
 
     useEffect(() => {
       const justStarted = running && !prevRunningRef.current;
@@ -187,6 +170,18 @@ const TimerCircle = forwardRef<TimerCircleRef, TimerCircleProps>(
         easing: Easing.out(Easing.cubic),
       });
     }, [seconds, onRunningChange, timerId, widthScale, borderProgress]);
+
+    useEffect(() => {
+      if (!running) return;
+      if (remaining <= 0) {
+        if (resetOnComplete) finish();
+        else setRunning(false);
+        onComplete?.();
+        return;
+      }
+      const t = setInterval(() => setRemaining((r) => r - 1), 1000);
+      return () => clearInterval(t);
+    }, [running, remaining, onComplete, resetOnComplete, finish]);
 
     const pause = useCallback(() => {
       cancelAnimation(borderProgress);
@@ -431,30 +426,36 @@ export default function HomeScreen() {
   } = useApp();
   const [expandedTimer, setExpandedTimer] = useState<TimerId | null>(null);
   const [isAlarmPlaying, setIsAlarmPlaying] = useState<boolean>(false);
-  const [currentPlayerIndex, setCurrentPlayerIndex] = useState(0);
+  const [turn, setTurn] = useState<Turn>(INITIAL_TURN);
   const [isRestartOrderConfirmOpen, setIsRestartOrderConfirmOpen] =
     useState(false);
   const timer30Ref = useRef<TimerCircleRef>(null);
   const timer15Ref = useRef<TimerCircleRef>(null);
   const alarmSoundRef = useRef<AudioPlayer | null>(null);
 
-  const orderedPlayerList = useMemo(
-    () => buildInterleavedPlayers(scoreColumns, participantsByTeam),
-    [scoreColumns, participantsByTeam],
+  const currentTurn = useMemo(
+    () => getTurnPlayer(turn, scoreColumns, participantsByTeam),
+    [turn, scoreColumns, participantsByTeam],
   );
-  const currentPlayerName =
-    orderedPlayerList.length > 0
-      ? orderedPlayerList[currentPlayerIndex % orderedPlayerList.length]
-      : null;
+  const currentPlayerName = currentTurn?.player ?? null;
+  const hasPlayers = currentTurn !== null;
+  const activeTeamsCount = getActiveTeams(scoreColumns, participantsByTeam).length;
+  const isAtFirstTurn = isFirstTurn(turn, scoreColumns, participantsByTeam);
   // expandedTimer só fica definido enquanto algum timer está rodando
   const isRestartOrderDisabled =
-    orderedPlayerList.length === 0 ||
-    expandedTimer !== null ||
-    currentPlayerIndex % orderedPlayerList.length === 0;
+    !hasPlayers || expandedTimer !== null || isAtFirstTurn;
+
+  // Refs para os callbacks dos timers sempre usarem os times atuais.
+  const teamsRef = useRef({ scoreColumns, participantsByTeam });
+  teamsRef.current = { scoreColumns, participantsByTeam };
+  const advanceTurn = useCallback(() => {
+    const { scoreColumns: order, participantsByTeam: players } = teamsRef.current;
+    setTurn((current) => nextTurn(current, order, players));
+  }, []);
 
   const handleRestartTimers = useCallback(() => {
     setExpandedTimer(null);
-    setCurrentPlayerIndex(0);
+    setTurn(INITIAL_TURN);
     timer30Ref.current?.reset();
     timer15Ref.current?.reset();
   }, []);
@@ -463,12 +464,9 @@ export default function HomeScreen() {
     setExpandedTimer(null);
     timer30Ref.current?.reset();
     timer15Ref.current?.reset();
-    setCurrentPlayerIndex((i) =>
-      orderedPlayerList.length > 0
-        ? (i - 1 + orderedPlayerList.length) % orderedPlayerList.length
-        : 0,
-    );
-  }, [orderedPlayerList.length]);
+    const { scoreColumns: order, participantsByTeam: players } = teamsRef.current;
+    setTurn((current) => previousTurn(current, order, players));
+  }, []);
 
   const stopAlarm = useCallback(async () => {
     try {
@@ -492,7 +490,7 @@ export default function HomeScreen() {
   const handleRestartOrder = useCallback(() => {
     setIsRestartOrderConfirmOpen(false);
     setExpandedTimer(null);
-    setCurrentPlayerIndex(0);
+    setTurn(INITIAL_TURN);
     timer30Ref.current?.reset();
     timer15Ref.current?.reset();
     void stopAlarm();
@@ -569,18 +567,14 @@ export default function HomeScreen() {
   const handleFinishTurn = useCallback(() => {
     timer15Ref.current?.reset();
     setExpandedTimer(null);
-    setCurrentPlayerIndex((i) =>
-      orderedPlayerList.length > 0 ? (i + 1) % orderedPlayerList.length : 0,
-    );
-  }, [orderedPlayerList.length]);
+    advanceTurn();
+  }, [advanceTurn]);
 
   const handle30sComplete = useCallback(() => {
     playAlarm();
     setExpandedTimer(null);
-    setCurrentPlayerIndex((i) =>
-      orderedPlayerList.length > 0 ? (i + 1) % orderedPlayerList.length : 0,
-    );
-  }, [playAlarm, orderedPlayerList.length]);
+    advanceTurn();
+  }, [playAlarm, advanceTurn]);
 
   const themedStyles = useMemo(
     () => ({
@@ -627,11 +621,24 @@ export default function HomeScreen() {
         >
           {currentPlayerName ?? "—"}
         </Text>
-        {orderedPlayerList.length === 0 && (
+        {!hasPlayers ? (
           <Text
             style={[styles.playerCalloutHint, { color: colors.textTertiary }]}
           >
             Adicione times e jogadores em Pontuações
+          </Text>
+        ) : activeTeamsCount < 2 ? (
+          <Text
+            style={[styles.playerCalloutHint, { color: colors.textTertiary }]}
+          >
+            Cadastre pelo menos 2 times com jogadores para alternar a vez
+          </Text>
+        ) : (
+          <Text
+            style={[styles.playerCalloutHint, { color: colors.textTertiary }]}
+            numberOfLines={1}
+          >
+            {currentTurn.team}
           </Text>
         )}
       </View>
@@ -679,9 +686,9 @@ export default function HomeScreen() {
           <TouchableOpacity
             onPress={handlePreviousPlayer}
             activeOpacity={0.8}
-            disabled={orderedPlayerList.length === 0}
+            disabled={!hasPlayers || isAtFirstTurn}
             style={[
-              orderedPlayerList.length === 0 &&
+              (!hasPlayers || isAtFirstTurn) &&
                 styles.timerControlButtonDisabled,
             ]}
           >
@@ -705,6 +712,7 @@ export default function HomeScreen() {
           expanded={expandedTimer === "primary"}
           onRunningChange={handleRunningChange}
           onComplete={handle30sComplete}
+          resetOnComplete
           onPressAction={() => {
             timer15Ref.current?.reset();
             void stopAlarm();
@@ -758,7 +766,7 @@ export default function HomeScreen() {
       <ConfirmDialog
         visible={isRestartOrderConfirmOpen}
         title="Reiniciar ordem?"
-        message={`A vez volta para ${orderedPlayerList[0] ?? "o primeiro jogador"}, o primeiro da ordem definida em Times.`}
+        message={`A vez volta para ${getTurnPlayer(INITIAL_TURN, scoreColumns, participantsByTeam)?.player ?? "o primeiro jogador"}, o primeiro da ordem definida em Times.`}
         confirmLabel="Reiniciar"
         onConfirm={handleRestartOrder}
         onCancel={() => setIsRestartOrderConfirmOpen(false)}

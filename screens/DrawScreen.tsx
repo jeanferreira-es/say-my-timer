@@ -27,6 +27,7 @@ const COLLECT_DELAY_MS = 2200;
 const REVEAL_DURATION_MS = 2600;
 const CIRCLE_SIZE = 70;
 const WINNER_CIRCLE_SIZE = 88;
+const WINNER_REVEAL_CIRCLE_SIZE = 140;
 const TOUCH_RING_EXTRA = 16;
 const TOUCH_RING_BORDER_WIDTH = 3;
 const PULSE_DURATION_MS = 1200;
@@ -421,19 +422,23 @@ export default function DrawScreen() {
             x={touchAreaOrigin.x + winnerCircle.x}
             y={touchAreaOrigin.y + winnerCircle.y}
             color={colors.background}
-            size={WINNER_CIRCLE_SIZE}
+            size={WINNER_REVEAL_CIRCLE_SIZE}
           />
           <View
             style={[
               styles.touchCircle,
               {
                 left:
-                  touchAreaOrigin.x + winnerCircle.x - WINNER_CIRCLE_SIZE / 2,
+                  touchAreaOrigin.x +
+                  winnerCircle.x -
+                  WINNER_REVEAL_CIRCLE_SIZE / 2,
                 top:
-                  touchAreaOrigin.y + winnerCircle.y - WINNER_CIRCLE_SIZE / 2,
-                width: WINNER_CIRCLE_SIZE,
-                height: WINNER_CIRCLE_SIZE,
-                borderRadius: WINNER_CIRCLE_SIZE / 2,
+                  touchAreaOrigin.y +
+                  winnerCircle.y -
+                  WINNER_REVEAL_CIRCLE_SIZE / 2,
+                width: WINNER_REVEAL_CIRCLE_SIZE,
+                height: WINNER_REVEAL_CIRCLE_SIZE,
+                borderRadius: WINNER_REVEAL_CIRCLE_SIZE / 2,
                 backgroundColor: colors.background,
               },
             ]}

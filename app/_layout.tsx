@@ -1,3 +1,4 @@
+import { AppSplash } from "@/components/AppSplash";
 import { AppProvider, useApp } from "@/context/AppContext";
 import { useFonts } from "@expo-google-fonts/alfa-slab-one";
 import { Stack } from "expo-router";
@@ -27,12 +28,12 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (loaded) {
-      SplashScreen.hideAsync();
+      SplashScreen.hideAsync().catch(() => {});
     }
   }, [loaded]);
 
   if (!loaded) {
-    return null;
+    return <AppSplash />;
   }
 
   return <RootLayoutNav />;
@@ -55,6 +56,7 @@ function RootLayoutNav() {
           <Stack.Screen name="alarm" options={{ headerShown: false }} />
           <Stack.Screen name="score" options={{ headerShown: false }} />
           <Stack.Screen name="draw" options={{ headerShown: false }} />
+          <Stack.Screen name="players" options={{ headerShown: false }} />
           <Stack.Screen name="edit-time" options={{ headerShown: false }} />
           <Stack.Screen name="modal" options={{ presentation: "modal" }} />
         </Stack>

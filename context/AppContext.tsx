@@ -9,8 +9,15 @@ import React, {
   useState,
 } from "react";
 import type { AlarmId } from "../config/alarms";
-import { DEFAULT_ALARM_ID } from "../config/alarms";
+import { ALARM_SOUNDS, DEFAULT_ALARM_ID } from "../config/alarms";
 import Colors from "../constants/Colors";
+import {
+  normalizePlayerName,
+  validateTeamName,
+  validateTeamPlayers,
+} from "../utils/teamRules";
+
+export { normalizePlayerName };
 
 export interface ScoreRow {
   id: string;
@@ -45,14 +52,8 @@ export interface PlayerNameUsage {
 type PlayerNameHistory = Record<string, PlayerNameUsage>;
 
 const PLAYER_NAME_HISTORY_KEY = "playerNameHistory";
-
-export function normalizePlayerName(name: string): string {
-  return name
-    .trim()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-}
+const ROSTER_PLAYERS_KEY = "rosterPlayers";
+const SELECTED_ALARM_KEY = "selectedAlarmId";
 
 export interface AppContextValue {
   counter: number;
@@ -62,17 +63,13 @@ export interface AppContextValue {
   scoreColumns: string[];
   participantsByTeam: Record<string, string[]>;
   updateScore: (rowId: string, column: string, value: string) => void;
-  addScoreColumn: (name: string) => boolean;
-  renameScoreColumn: (teamName: string, nextName: string) => boolean;
+  // As funções de times retornam a mensagem de erro, ou null em caso de sucesso.
+  addTeam: (teamName: string, players: string[]) => string | null;
+  renameScoreColumn: (teamName: string, nextName: string) => string | null;
   removeScoreColumn: (teamName: string) => void;
   reorderScoreColumns: (newOrder: string[]) => void;
   moveTeam: (teamIndex: number, direction: "left" | "right") => void;
-  addParticipantToTeam: (teamName: string, participantName: string) => boolean;
-  updateParticipant: (
-    teamName: string,
-    participantIndex: number,
-    nextName: string,
-  ) => boolean;
+  setTeamParticipants: (teamName: string, players: string[]) => string | null;
   removeParticipant: (teamName: string, participantName: string) => void;
   reorderParticipants: (teamName: string, newOrder: string[]) => void;
   getPlayerSuggestions: (
@@ -80,6 +77,9 @@ export interface AppContextValue {
     exclude?: string[],
     limit?: number,
   ) => string[];
+  rosterPlayers: string[];
+  addRosterPlayer: (name: string) => boolean;
+  removeRosterPlayer: (name: string) => void;
   themeMode: ThemeMode;
   colors: ThemeColors;
   toggleTheme: () => void;
@@ -145,13 +145,89 @@ export function AppProvider({ children }: AppProviderProps) {
     Record<string, string[]>
   >({});
   const [themeMode, setThemeMode] = useState<ThemeMode>("dark");
-  const [selectedAlarmId, setSelectedAlarmId] =
+  const [selectedAlarmId, setSelectedAlarmIdState] =
     useState<AlarmId>(DEFAULT_ALARM_ID);
+  const alarmChosenBeforeLoad = useRef(false);
   const [secondaryTimerSeconds, setSecondaryTimerSeconds] =
     useState<number>(15);
   const [playerNameHistory, setPlayerNameHistory] =
     useState<PlayerNameHistory>({});
   const playerNameHistoryLoaded = useRef(false);
+  useEffect(() => {
+    AsyncStorage.getItem(SELECTED_ALARM_KEY)
+      .then((stored) => {
+        // Ignore unknown ids (e.g. an alarm removed in a later version).
+        if (alarmChosenBeforeLoad.current || !stored || !(stored in ALARM_SOUNDS)) {
+          return;
+        }
+        setSelectedAlarmIdState(stored as AlarmId);
+      })
+      .catch(() => {});
+  }, []);
+
+  const setSelectedAlarmId = useCallback((id: AlarmId) => {
+    alarmChosenBeforeLoad.current = true;
+    setSelectedAlarmIdState(id);
+    AsyncStorage.setItem(SELECTED_ALARM_KEY, id).catch(() => {});
+  }, []);
+
+  const [rosterPlayers, setRosterPlayers] = useState<string[]>([]);
+  const rosterPlayersLoaded = useRef(false);
+
+  useEffect(() => {
+    AsyncStorage.getItem(ROSTER_PLAYERS_KEY)
+      .then((stored) => {
+        if (!stored) return;
+        const parsed: string[] = JSON.parse(stored);
+        // Players added before loading finished are kept after stored ones.
+        setRosterPlayers((current) => [
+          ...parsed,
+          ...current.filter(
+            (name) =>
+              !parsed.some(
+                (storedName) =>
+                  normalizePlayerName(storedName) === normalizePlayerName(name),
+              ),
+          ),
+        ]);
+      })
+      .catch(() => {})
+      .finally(() => {
+        rosterPlayersLoaded.current = true;
+      });
+  }, []);
+
+  useEffect(() => {
+    if (!rosterPlayersLoaded.current) return;
+    AsyncStorage.setItem(
+      ROSTER_PLAYERS_KEY,
+      JSON.stringify(rosterPlayers),
+    ).catch(() => {});
+  }, [rosterPlayers]);
+
+  const addRosterPlayer = useCallback(
+    (name: string) => {
+      const trimmed = name.trim();
+      const key = normalizePlayerName(trimmed);
+      if (!key) return false;
+
+      const alreadyExists = rosterPlayers.some(
+        (player) => normalizePlayerName(player) === key,
+      );
+      if (alreadyExists) return false;
+
+      setRosterPlayers((prev) => [...prev, trimmed]);
+      return true;
+    },
+    [rosterPlayers],
+  );
+
+  const removeRosterPlayer = useCallback((name: string) => {
+    const key = normalizePlayerName(name);
+    setRosterPlayers((prev) =>
+      prev.filter((player) => normalizePlayerName(player) !== key),
+    );
+  }, []);
 
   useEffect(() => {
     AsyncStorage.getItem(PLAYER_NAME_HISTORY_KEY)
@@ -196,7 +272,14 @@ export function AppProvider({ children }: AppProviderProps) {
 
       const excluded = new Set(exclude.map(normalizePlayerName));
 
-      return Object.entries(playerNameHistory)
+      // Roster players are suggested even before they were ever used.
+      const candidates: PlayerNameHistory = { ...playerNameHistory };
+      rosterPlayers.forEach((player) => {
+        const key = normalizePlayerName(player);
+        candidates[key] ??= { name: player, count: 0, lastUsedAt: 0 };
+      });
+
+      return Object.entries(candidates)
         .filter(
           ([key]) =>
             key !== normalizedQuery &&
@@ -215,7 +298,7 @@ export function AppProvider({ children }: AppProviderProps) {
         .slice(0, limit)
         .map(([, usage]) => usage.name);
     },
-    [playerNameHistory],
+    [playerNameHistory, rosterPlayers],
   );
 
   const colors = useMemo(
@@ -249,34 +332,22 @@ export function AppProvider({ children }: AppProviderProps) {
     [],
   );
 
-  const addScoreColumn = useCallback((name: string) => {
-    const trimmedName = name.trim();
+  const addTeam = useCallback(
+    (teamName: string, players: string[]) => {
+      const name = teamName.trim();
+      const nameError = validateTeamName(scoreColumns, name);
+      if (nameError) return nameError;
+      const playersError = validateTeamPlayers(participantsByTeam, name, players);
+      if (playersError) return playersError;
 
-    if (!trimmedName) {
-      return false;
-    }
-
-    let wasAdded = false;
-
-    setScoreColumns((prev) => {
-      const alreadyExists = prev.some(
-        (column) => column.toLowerCase() === trimmedName.toLowerCase(),
-      );
-
-      if (alreadyExists) {
-        return prev;
-      }
-
-      wasAdded = true;
-      setParticipantsByTeam((current) => ({
-        ...current,
-        [trimmedName]: current[trimmedName] ?? [],
-      }));
-      return [...prev, trimmedName];
-    });
-
-    return wasAdded;
-  }, []);
+      const trimmedPlayers = players.map((player) => player.trim());
+      setScoreColumns((prev) => [...prev, name]);
+      setParticipantsByTeam((prev) => ({ ...prev, [name]: trimmedPlayers }));
+      trimmedPlayers.forEach(recordPlayerName);
+      return null;
+    },
+    [participantsByTeam, recordPlayerName, scoreColumns],
+  );
 
   const removeScoreColumn = useCallback((teamName: string) => {
     const trimmed = teamName.trim();
@@ -299,17 +370,10 @@ export function AppProvider({ children }: AppProviderProps) {
     (teamName: string, nextName: string) => {
       const trimmed = teamName.trim();
       const next = nextName.trim();
-      if (!trimmed || !next) return false;
-      if (trimmed === next) return true;
-
-      const alreadyExists = scoreColumns.some(
-        (column) =>
-          column !== trimmed && column.toLowerCase() === next.toLowerCase(),
-      );
-
-      if (!scoreColumns.includes(trimmed) || alreadyExists) {
-        return false;
-      }
+      if (!scoreColumns.includes(trimmed)) return "Time não encontrado";
+      const nameError = validateTeamName(scoreColumns, next, trimmed);
+      if (nameError) return nameError;
+      if (trimmed === next) return null;
 
       setScoreColumns((prev) =>
         prev.map((column) => (column === trimmed ? next : column)),
@@ -337,7 +401,7 @@ export function AppProvider({ children }: AppProviderProps) {
         }),
       );
 
-      return true;
+      return null;
     },
     [scoreColumns],
   );
@@ -364,90 +428,28 @@ export function AppProvider({ children }: AppProviderProps) {
     [],
   );
 
-  const addParticipantToTeam = useCallback(
-    (teamName: string, participantName: string) => {
-      const trimmedTeamName = teamName.trim();
-      const trimmedParticipantName = participantName.trim();
+  const setTeamParticipants = useCallback(
+    (teamName: string, players: string[]) => {
+      const name = teamName.trim();
+      if (!scoreColumns.includes(name)) return "Time não encontrado";
+      const playersError = validateTeamPlayers(participantsByTeam, name, players);
+      if (playersError) return playersError;
 
-      if (!trimmedTeamName || !trimmedParticipantName) {
-        return false;
-      }
-
-      let wasAdded = false;
-
-      setParticipantsByTeam((prev) => {
-        const currentParticipants = prev[trimmedTeamName] ?? [];
-        const alreadyExists = currentParticipants.some(
-          (participant) =>
-            participant.toLowerCase() === trimmedParticipantName.toLowerCase(),
-        );
-
-        if (alreadyExists) {
-          return prev;
-        }
-
-        wasAdded = true;
-
-        return {
-          ...prev,
-          [trimmedTeamName]: [...currentParticipants, trimmedParticipantName],
-        };
-      });
-
-      recordPlayerName(trimmedParticipantName);
-
-      return wasAdded;
+      const current = participantsByTeam[name] ?? [];
+      const trimmedPlayers = players.map((player) => player.trim());
+      setParticipantsByTeam((prev) => ({ ...prev, [name]: trimmedPlayers }));
+      trimmedPlayers
+        .filter(
+          (player) =>
+            !current.some(
+              (existing) =>
+                normalizePlayerName(existing) === normalizePlayerName(player),
+            ),
+        )
+        .forEach(recordPlayerName);
+      return null;
     },
-    [recordPlayerName],
-  );
-
-  const updateParticipant = useCallback(
-    (teamName: string, participantIndex: number, nextName: string) => {
-      const trimmed = teamName.trim();
-      const next = nextName.trim();
-      const participants = participantsByTeam[trimmed] ?? [];
-      const currentParticipant = participants[participantIndex];
-
-      if (!trimmed || !next || currentParticipant === undefined) {
-        return false;
-      }
-
-      if (currentParticipant === next) {
-        return true;
-      }
-
-      const alreadyExists = participants.some(
-        (participant, index) =>
-          index !== participantIndex &&
-          participant.toLowerCase() === next.toLowerCase(),
-      );
-
-      if (alreadyExists) {
-        return false;
-      }
-
-      setParticipantsByTeam((prev) => {
-        const current = prev[trimmed] ?? [];
-        if (current[participantIndex] === undefined) return prev;
-
-        const nextParticipants = [...current];
-        nextParticipants[participantIndex] = next;
-
-        return {
-          ...prev,
-          [trimmed]: nextParticipants,
-        };
-      });
-
-      if (
-        normalizePlayerName(currentParticipant) !== normalizePlayerName(next)
-      ) {
-        recordPlayerName(next);
-      }
-
-      return true;
-    },
-    [participantsByTeam, recordPlayerName],
+    [participantsByTeam, recordPlayerName, scoreColumns],
   );
 
   const removeParticipant = useCallback(
@@ -482,16 +484,18 @@ export function AppProvider({ children }: AppProviderProps) {
       scoreColumns,
       participantsByTeam,
       updateScore,
-      addScoreColumn,
+      addTeam,
       renameScoreColumn,
       removeScoreColumn,
       reorderScoreColumns,
       moveTeam,
-      addParticipantToTeam,
-      updateParticipant,
+      setTeamParticipants,
       removeParticipant,
       reorderParticipants,
       getPlayerSuggestions,
+      rosterPlayers,
+      addRosterPlayer,
+      removeRosterPlayer,
       themeMode,
       colors,
       toggleTheme,
@@ -508,20 +512,23 @@ export function AppProvider({ children }: AppProviderProps) {
       scoreColumns,
       participantsByTeam,
       updateScore,
-      addScoreColumn,
+      addTeam,
       renameScoreColumn,
       removeScoreColumn,
       reorderScoreColumns,
       moveTeam,
-      addParticipantToTeam,
-      updateParticipant,
+      setTeamParticipants,
       removeParticipant,
       reorderParticipants,
       getPlayerSuggestions,
+      rosterPlayers,
+      addRosterPlayer,
+      removeRosterPlayer,
       themeMode,
       colors,
       toggleTheme,
       selectedAlarmId,
+      setSelectedAlarmId,
       secondaryTimerSeconds,
     ],
   );
