@@ -1,4 +1,3 @@
-import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -45,12 +44,6 @@ export default function TimeEditorScreen() {
         ...styles.containerBase,
         backgroundColor: colors.background,
       },
-      backButton: {
-        ...styles.backButtonBase,
-        borderColor: colors.border,
-        backgroundColor: colors.surface,
-      },
-      title: { ...styles.titleBase, color: colors.text },
       subtitle: { ...styles.subtitleBase, color: colors.textSecondary },
       card: {
         ...styles.cardBase,
@@ -81,17 +74,6 @@ export default function TimeEditorScreen() {
       style={themedStyles.container}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      <View style={styles.header}>
-        <TouchableOpacity
-          style={themedStyles.backButton}
-          onPress={() => router.back()}
-          activeOpacity={0.8}
-        >
-          <Ionicons name="arrow-back" size={20} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={themedStyles.title}>Tempo de preparação</Text>
-      </View>
-
       <View style={styles.content}>
         <Text style={themedStyles.subtitle}>
           Defina quantos segundos o timer menor deve ter antes de iniciar o
@@ -134,30 +116,10 @@ const styles = StyleSheet.create({
   containerBase: {
     flex: 1,
   },
-  header: {
-    paddingTop: 56,
-    paddingHorizontal: 20,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  backButtonBase: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 2,
-  },
   content: {
     flex: 1,
     paddingHorizontal: 20,
     paddingTop: 24,
-  },
-  titleBase: {
-    fontSize: 28,
-    fontWeight: "700",
   },
   subtitleBase: {
     fontSize: 15,

@@ -36,12 +36,13 @@ import {
 import Animated, {
   cancelAnimation,
   Easing,
+  type SharedValue,
   useAnimatedProps,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
 } from "react-native-reanimated";
-import Svg, { Circle } from "react-native-svg";
+import Svg, { G, Path } from "react-native-svg";
 
 import {
   INITIAL_TURN,
@@ -65,7 +66,204 @@ type TimerSize = "large" | "small";
 type TimerSeconds = number;
 type TimerId = "primary" | "secondary";
 
-const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+// Blocos ao redor do timer: poucos o bastante para manter o círculo legível
+const SEGMENT_COUNT = 15;
+const SEGMENT_GAP_DEG = 8;
+// Fração do período de cada bloco que a gota leva para atravessar o espaço
+const SEGMENT_DROP = 0.3;
+// Ondulação da borda do líquido: oscilações por bloco e amplitude (fração da largura do anel)
+const SEGMENT_WAVES = 4;
+const SEGMENT_WAVE_AMPLITUDE = 0.18;
+
+const AnimatedPath = Animated.createAnimatedComponent(Path);
+
+interface SegmentGeometry {
+  center: number;
+  innerRadius: number;
+  outerRadius: number;
+  midRadius: number;
+  cornerRadius: number;
+  step: number;
+  inset: number;
+  gap: number;
+}
+
+const clamp01 = (v: number) => {
+  "worklet";
+  return Math.min(Math.max(v, 0), 1);
+};
+
+// Setor de anel (trapézio curvo); o stroke com junção arredondada arredonda os cantos
+function segmentPath(
+  center: number,
+  innerRadius: number,
+  outerRadius: number,
+  startDeg: number,
+  endDeg: number,
+): string {
+  "worklet";
+  const point = (r: number, deg: number) => {
+    const rad = ((deg - 90) * Math.PI) / 180;
+    return `${center + r * Math.cos(rad)} ${center + r * Math.sin(rad)}`;
+  };
+  return [
+    `M ${point(outerRadius, startDeg)}`,
+    `A ${outerRadius} ${outerRadius} 0 0 1 ${point(outerRadius, endDeg)}`,
+    `L ${point(innerRadius, endDeg)}`,
+    `A ${innerRadius} ${innerRadius} 0 0 0 ${point(innerRadius, startDeg)}`,
+    "Z",
+  ].join(" ");
+}
+
+// Setor preenchido com a borda de avanço ondulada (curva em S que oscila)
+function fillPath(
+  center: number,
+  innerRadius: number,
+  outerRadius: number,
+  startDeg: number,
+  endDeg: number,
+  wave: number,
+  phase: number,
+): string {
+  "worklet";
+  const rad = ((endDeg - 90) * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const point = (r: number, deg: number) => {
+    const a = ((deg - 90) * Math.PI) / 180;
+    return `${center + r * Math.cos(a)} ${center + r * Math.sin(a)}`;
+  };
+  // Ponto na borda de avanço, a uma distância r do centro, deslocado na tangente
+  const edge = (r: number, offset: number) =>
+    `${center + r * cos - offset * sin} ${center + r * sin + offset * cos}`;
+  const thickness = outerRadius - innerRadius;
+  const c1 = wave * Math.sin(phase);
+  const c2 = wave * Math.sin(phase + Math.PI * 0.8);
+  return [
+    `M ${point(outerRadius, startDeg)}`,
+    `A ${outerRadius} ${outerRadius} 0 0 1 ${point(outerRadius, endDeg)}`,
+    `C ${edge(outerRadius - thickness / 3, c1)} ${edge(innerRadius + thickness / 3, c2)} ${point(innerRadius, endDeg)}`,
+    `A ${innerRadius} ${innerRadius} 0 0 0 ${point(innerRadius, startDeg)}`,
+    "Z",
+  ].join(" ");
+}
+
+// Gota no espaço entre dois blocos, em coordenadas locais: x tangente
+// (negativo = bloco anterior), y radial. s vai de 0 a 1: a gota escorre até
+// tocar o próximo bloco (s = 0.5) e depois o pescoço afina até se soltar.
+function dropPath(s: number, halfGap: number, halfHeight: number): string {
+  "worklet";
+  const x0 = -halfGap;
+  const x1 = halfGap;
+  if (s < 0.5) {
+    const t = s / 0.5;
+    const a = halfHeight * 0.55;
+    const tip = x0 + (x1 - x0) * t * t * (3 - 2 * t);
+    const mid = (x0 + tip) / 2;
+    return [
+      `M ${x0} ${-a}`,
+      `C ${mid} ${-a * 0.5} ${tip} ${-a} ${tip} 0`,
+      `C ${tip} ${a} ${mid} ${a * 0.5} ${x0} ${a}`,
+      "Z",
+    ].join(" ");
+  }
+  const t = (s - 0.5) / 0.5;
+  const a = halfHeight * 0.55 * (1 - 0.4 * t);
+  const n = a * (1 - t) * 0.7;
+  return [
+    `M ${x0} ${-a}`,
+    `C ${x0 / 2} ${-a} ${x0 / 2} ${-n} 0 ${-n}`,
+    `C ${x1 / 2} ${-n} ${x1 / 2} ${-a} ${x1} ${-a}`,
+    `L ${x1} ${a}`,
+    `C ${x1 / 2} ${a} ${x1 / 2} ${n} 0 ${n}`,
+    `C ${x0 / 2} ${n} ${x0 / 2} ${a} ${x0} ${a}`,
+    "Z",
+  ].join(" ");
+}
+
+interface ProgressSegmentProps {
+  index: number;
+  geometry: SegmentGeometry;
+  progress: SharedValue<number>;
+  color: string;
+}
+
+// Preenche o bloco como líquido; termina no fim do seu trecho, então o último
+// bloco fica completo junto com o tempo
+function ProgressSegment({
+  index,
+  geometry,
+  progress,
+  color,
+}: ProgressSegmentProps) {
+  const animatedProps = useAnimatedProps(() => {
+    const { center, innerRadius, outerRadius, step, inset } = geometry;
+    // A partir do segundo bloco, o líquido começa quando a gota encosta
+    const delay = index === 0 ? 0 : SEGMENT_DROP / 2;
+    const fill = clamp01(
+      (progress.value * SEGMENT_COUNT - index - delay) / (1 - delay),
+    );
+    const startDeg = index * step + inset;
+    const endDeg = startDeg + (step - inset * 2) * fill;
+    // Some nas pontas, para o bloco começar e terminar com a borda reta
+    const wave =
+      (outerRadius - innerRadius) *
+      SEGMENT_WAVE_AMPLITUDE *
+      Math.sin(Math.PI * fill);
+    const phase = progress.value * SEGMENT_COUNT * SEGMENT_WAVES * Math.PI * 2;
+    return {
+      d: fillPath(
+        center,
+        innerRadius,
+        outerRadius,
+        startDeg,
+        endDeg,
+        wave,
+        phase,
+      ),
+      opacity: fill > 0 ? 1 : 0,
+    };
+  });
+  return (
+    <AnimatedPath
+      fill={color}
+      stroke={color}
+      strokeWidth={geometry.cornerRadius * 2}
+      strokeLinejoin="round"
+      animatedProps={animatedProps}
+    />
+  );
+}
+
+interface SegmentDropProps {
+  index: number;
+  geometry: SegmentGeometry;
+  progress: SharedValue<number>;
+  color: string;
+}
+
+// Gota que sai do bloco `index` e dá cor ao próximo
+function SegmentDrop({ index, geometry, progress, color }: SegmentDropProps) {
+  const { center, midRadius, outerRadius, innerRadius, cornerRadius, gap } =
+    geometry;
+  const animatedProps = useAnimatedProps(() => {
+    const s = (progress.value * SEGMENT_COUNT - (index + 1)) / SEGMENT_DROP;
+    if (s <= 0 || s >= 1) return { d: "M 0 0", opacity: 0 };
+    const halfHeight = (outerRadius - innerRadius) / 2 + cornerRadius;
+    return {
+      d: dropPath(s, gap / 2 + cornerRadius, halfHeight),
+      opacity: 1,
+    };
+  });
+  const deg = (index + 1) * geometry.step;
+  return (
+    <G
+      transform={`rotate(${deg} ${center} ${center}) translate(${center} ${center - midRadius})`}
+    >
+      <AnimatedPath fill={color} animatedProps={animatedProps} />
+    </G>
+  );
+}
 
 export interface TimerCircleRef {
   start: () => void;
@@ -77,7 +275,6 @@ interface TimerCircleProps {
   timerId: TimerId;
   seconds: TimerSeconds;
   size: TimerSize;
-  label: string;
   onComplete?: () => void;
   // Volta automaticamente ao tempo inicial quando chega a zero
   resetOnComplete?: boolean;
@@ -94,7 +291,6 @@ const TimerCircle = forwardRef<TimerCircleRef, TimerCircleProps>(
       timerId,
       seconds,
       size,
-      label,
       onComplete,
       resetOnComplete = false,
       expanded,
@@ -231,18 +427,50 @@ const TimerCircle = forwardRef<TimerCircleRef, TimerCircleProps>(
       }
     };
 
-    const { width } = useWindowDimensions();
+    const { width, height } = useWindowDimensions();
     const isLarge = size === "large";
-    const horizontalMargin = 40;
-    const maxLargeDimension = (width - horizontalMargin * 2) / 2;
-    const baseDimension = isLarge
-      ? Math.min(width * 0.45, 180, maxLargeDimension)
-      : Math.min(width * 0.28, 110);
-    const dimension = baseDimension;
+    // Cresce com a tela (tablets inclusive), limitado pela altura para caber a
+    // coluna de timers e pela largura para caber expandido (2x) enquanto roda
+    const largeDimension = Math.min(
+      width * 0.4,
+      height * 0.28,
+      (width - 48) / 2,
+    );
+    const dimension = isLarge ? largeDimension : largeDimension * 0.7;
     const fontSize = isLarge ? dimension * 0.45 : dimension * 0.22;
-    const strokeWidth = 6;
-    const radius = dimension / 2 - strokeWidth / 2;
-    const circumference = 2 * Math.PI * radius;
+    const center = dimension / 2;
+    const cornerRadius = dimension * 0.025;
+    const outerRadius = center - dimension * 0.04 - cornerRadius;
+    const innerRadius = outerRadius - dimension * 0.11 + cornerRadius * 2;
+    const geometry = useMemo<SegmentGeometry>(() => {
+      const step = 360 / SEGMENT_COUNT;
+      const midRadius = (innerRadius + outerRadius) / 2;
+      const inset =
+        SEGMENT_GAP_DEG / 2 + (cornerRadius / midRadius) * (180 / Math.PI);
+      return {
+        center,
+        innerRadius,
+        outerRadius,
+        midRadius,
+        cornerRadius,
+        step,
+        inset,
+        gap: (SEGMENT_GAP_DEG * Math.PI * midRadius) / 180,
+      };
+    }, [center, innerRadius, outerRadius, cornerRadius]);
+    const segmentPaths = useMemo(
+      () =>
+        Array.from({ length: SEGMENT_COUNT }, (_, i) =>
+          segmentPath(
+            center,
+            innerRadius,
+            outerRadius,
+            i * geometry.step + geometry.inset,
+            (i + 1) * geometry.step - geometry.inset,
+          ),
+        ),
+      [center, innerRadius, outerRadius, geometry],
+    );
 
     const isExpandable = true;
     const hasBorderProgress = true;
@@ -260,10 +488,6 @@ const TimerCircle = forwardRef<TimerCircleRef, TimerCircleProps>(
         borderRadius: sizeVal / 2,
       };
     }, [dimension, isExpandable]);
-
-    const animatedProgressProps = useAnimatedProps(() => ({
-      strokeDashoffset: circumference * (1 - borderProgress.value),
-    }));
 
     const animatedContentStyle = useAnimatedStyle(() => {
       if (!isExpandable) return {};
@@ -298,26 +522,34 @@ const TimerCircle = forwardRef<TimerCircleRef, TimerCircleProps>(
               viewBox={`0 0 ${dimension} ${dimension}`}
               style={styles.progressRing}
             >
-              <Circle
-                cx={dimension / 2}
-                cy={dimension / 2}
-                r={radius}
-                stroke={colors.border}
-                strokeWidth={strokeWidth}
-                fill="none"
-              />
-              <AnimatedCircle
-                cx={dimension / 2}
-                cy={dimension / 2}
-                r={radius}
-                stroke={colors.accent}
-                strokeWidth={strokeWidth}
-                fill="none"
-                strokeLinecap="round"
-                strokeDasharray={`${circumference} ${circumference}`}
-                animatedProps={animatedProgressProps}
-                transform={`rotate(-90 ${dimension / 2} ${dimension / 2})`}
-              />
+              {segmentPaths.map((d, i) => (
+                <Path
+                  key={`base-${i}`}
+                  d={d}
+                  fill={colors.border}
+                  stroke={colors.border}
+                  strokeWidth={cornerRadius * 2}
+                  strokeLinejoin="round"
+                />
+              ))}
+              {segmentPaths.map((_, i) => (
+                <ProgressSegment
+                  key={`fill-${i}`}
+                  index={i}
+                  geometry={geometry}
+                  progress={borderProgress}
+                  color={colors.accent}
+                />
+              ))}
+              {segmentPaths.slice(1).map((_, i) => (
+                <SegmentDrop
+                  key={`drop-${i}`}
+                  index={i}
+                  geometry={geometry}
+                  progress={borderProgress}
+                  color={colors.accent}
+                />
+              ))}
             </Svg>
           )}
           <Animated.View
@@ -331,11 +563,6 @@ const TimerCircle = forwardRef<TimerCircleRef, TimerCircleProps>(
               ]}
             >
               {remaining}
-            </Text>
-            <Text
-              style={[styles.timerLabelBase, { color: colors.textSecondary }]}
-            >
-              {label}
             </Text>
           </Animated.View>
         </Animated.View>
@@ -708,7 +935,6 @@ export default function HomeScreen() {
           ref={timer30Ref}
           seconds={PRIMARY_TIMER_SECONDS}
           size="large"
-          label="30s"
           expanded={expandedTimer === "primary"}
           onRunningChange={handleRunningChange}
           onComplete={handle30sComplete}
@@ -726,7 +952,6 @@ export default function HomeScreen() {
             ref={timer15Ref}
             seconds={secondaryTimerSeconds}
             size="small"
-            label={`${secondaryTimerSeconds}s`}
             expanded={expandedTimer === "secondary"}
             onRunningChange={handleRunningChange}
             onComplete={handle15sComplete}
@@ -934,10 +1159,6 @@ const styles = StyleSheet.create({
   timerValueBase: {
     fontFamily: "AlfaSlabOne",
     // fontWeight: "800",
-  },
-  timerLabelBase: {
-    fontSize: 12,
-    marginTop: 4,
   },
   teamsFab: {
     position: "absolute",

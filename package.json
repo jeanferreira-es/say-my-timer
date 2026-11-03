@@ -6,7 +6,8 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "lint": "expo lint"
   },
   "dependencies": {
     "@expo-google-fonts/alfa-slab-one": "^0.4.1",
@@ -26,6 +27,7 @@
     "expo-splash-screen": "~58.0.11",
     "expo-status-bar": "~58.0.4",
     "expo-symbols": "~58.0.4",
+    "expo-system-ui": "~58.0.7",
     "expo-web-browser": "~58.0.6",
     "lru-cache": "^11.2.6",
     "react": "19.3.0",
@@ -42,6 +44,8 @@
   },
   "devDependencies": {
     "@types/react": "~19.3.0",
+    "eslint": "^9.0.0",
+    "eslint-config-expo": "~58.0.4",
     "typescript": "~6.0.3"
   },
   "private": true

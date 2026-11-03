@@ -1,13 +1,11 @@
-import { Ionicons } from "@expo/vector-icons";
 import { createAudioPlayer, setAudioModeAsync } from "expo-audio";
-import { useRouter } from "expo-router";
+import { useNavigation } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   GestureResponderEvent,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from "react-native";
 import { useApp } from "../context/AppContext";
@@ -164,8 +162,8 @@ function WinnerPulse({
 }
 
 export default function DrawScreen() {
-  const router = useRouter();
   const { colors } = useApp();
+  const navigation = useNavigation();
 
   const [phase, setPhase] = useState<DrawPhase>("idle");
   const [touches, setTouches] = useState<TouchPoint[]>([]);
@@ -291,6 +289,16 @@ export default function DrawScreen() {
     };
   }, []);
 
+  // Pinta o header junto com a tela enquanto o resultado está à mostra
+  const isShowingResult = phase === "result" || phase === "revealed";
+  useEffect(() => {
+    navigation.setOptions({
+      headerStyle: {
+        backgroundColor: isShowingResult ? colors.accent : colors.background,
+      },
+    });
+  }, [colors, isShowingResult, navigation]);
+
   const handleTouchChange = useCallback((evt: GestureResponderEvent) => {
     if (phaseRef.current === "spinning" || phaseRef.current === "result" || phaseRef.current === "revealed") {
       return;
@@ -318,9 +326,6 @@ export default function DrawScreen() {
     }
   }, []);
 
-  const handleGoBack = useCallback(() => {
-    router.back();
-  }, [router]);
 
   const themedStyles = useMemo(
     () => ({
@@ -328,13 +333,6 @@ export default function DrawScreen() {
         ...styles.containerBase,
         backgroundColor: colors.background,
       },
-      header: { ...styles.headerBase, borderBottomColor: colors.border },
-      backButton: {
-        ...styles.backButtonBase,
-        borderColor: colors.border,
-        backgroundColor: colors.surface,
-      },
-      title: { ...styles.titleBase, color: colors.text },
       subtitle: { ...styles.subtitleBase, color: colors.textSecondary },
     }),
     [colors],
@@ -370,17 +368,6 @@ export default function DrawScreen() {
 
   return (
     <View style={themedStyles.container}>
-      <View style={themedStyles.header}>
-        <TouchableOpacity
-          style={themedStyles.backButton}
-          onPress={handleGoBack}
-          activeOpacity={0.8}
-        >
-          <Ionicons name="arrow-back" size={20} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={themedStyles.title}>Sortear</Text>
-      </View>
-
       <Text style={themedStyles.subtitle}>
         {statusMessage(phase, touches.length)}
       </Text>
@@ -452,28 +439,6 @@ export default function DrawScreen() {
 const styles = StyleSheet.create({
   containerBase: {
     flex: 1,
-  },
-  headerBase: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    paddingTop: 56,
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-    borderBottomWidth: 1,
-  },
-  backButtonBase: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 2,
-  },
-  titleBase: {
-    fontSize: 24,
-    fontWeight: "700",
   },
   subtitleBase: {
     fontSize: 14,

@@ -27,7 +27,8 @@ export const ALARM_SOUNDS: Record<AlarmId, number> = {
   alarm12: require('../assets/audio/alarm12.wav'),
 };
 
-export const ALARM_OPTIONS = (Object.keys(ALARM_SOUNDS) as AlarmId[]).map((id) => ({
+// Rótulo pela posição na lista; os ids continuam iguais para não perder a escolha salva
+export const ALARM_OPTIONS = (Object.keys(ALARM_SOUNDS) as AlarmId[]).map((id, index) => ({
   id,
-  label: `Alarme ${id.replace('alarm', '')}`,
+  label: `Som ${index + 1}`,
 }));

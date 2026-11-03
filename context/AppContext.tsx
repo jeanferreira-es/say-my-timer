@@ -11,6 +11,7 @@ import React, {
 import type { AlarmId } from "../config/alarms";
 import { ALARM_SOUNDS, DEFAULT_ALARM_ID } from "../config/alarms";
 import Colors from "../constants/Colors";
+import type { TeamStyle } from "../utils/teamGradients";
 import {
   normalizePlayerName,
   validateTeamName,
@@ -54,6 +55,7 @@ type PlayerNameHistory = Record<string, PlayerNameUsage>;
 const PLAYER_NAME_HISTORY_KEY = "playerNameHistory";
 const ROSTER_PLAYERS_KEY = "rosterPlayers";
 const SELECTED_ALARM_KEY = "selectedAlarmId";
+const THEME_MODE_KEY = "themeMode";
 
 export interface AppContextValue {
   counter: number;
@@ -62,6 +64,9 @@ export interface AppContextValue {
   scores: ScoreRow[];
   scoreColumns: string[];
   participantsByTeam: Record<string, string[]>;
+  // Tema e ícone escolhidos por time; ausente = padrão pela posição
+  teamStyles: Record<string, TeamStyle>;
+  setTeamStyle: (teamName: string, style: TeamStyle) => void;
   updateScore: (rowId: string, column: string, value: string) => void;
   // As funções de times retornam a mensagem de erro, ou null em caso de sucesso.
   addTeam: (teamName: string, players: string[]) => string | null;
@@ -81,6 +86,7 @@ export interface AppContextValue {
   addRosterPlayer: (name: string) => boolean;
   removeRosterPlayer: (name: string) => void;
   themeMode: ThemeMode;
+  isThemeReady: boolean;
   colors: ThemeColors;
   toggleTheme: () => void;
   selectedAlarmId: AlarmId;
@@ -144,7 +150,10 @@ export function AppProvider({ children }: AppProviderProps) {
   const [participantsByTeam, setParticipantsByTeam] = useState<
     Record<string, string[]>
   >({});
+  const [teamStyles, setTeamStyles] = useState<Record<string, TeamStyle>>({});
   const [themeMode, setThemeMode] = useState<ThemeMode>("dark");
+  // A splash só some depois de ler o tema salvo, para não abrir no tema errado
+  const [isThemeReady, setIsThemeReady] = useState(false);
   const [selectedAlarmId, setSelectedAlarmIdState] =
     useState<AlarmId>(DEFAULT_ALARM_ID);
   const alarmChosenBeforeLoad = useRef(false);
@@ -306,8 +315,21 @@ export function AppProvider({ children }: AppProviderProps) {
     [themeMode],
   );
 
+  useEffect(() => {
+    AsyncStorage.getItem(THEME_MODE_KEY)
+      .then((stored) => {
+        if (stored === "light" || stored === "dark") setThemeMode(stored);
+      })
+      .catch(() => {})
+      .finally(() => setIsThemeReady(true));
+  }, []);
+
   const toggleTheme = useCallback(() => {
-    setThemeMode((prev) => (prev === "light" ? "dark" : "light"));
+    setThemeMode((prev) => {
+      const next = prev === "light" ? "dark" : "light";
+      AsyncStorage.setItem(THEME_MODE_KEY, next).catch(() => {});
+      return next;
+    });
   }, []);
 
   const incrementCounter = useCallback(() => setCounter((c) => c + 1), []);
@@ -358,6 +380,11 @@ export function AppProvider({ children }: AppProviderProps) {
       delete next[trimmed];
       return next;
     });
+    setTeamStyles((prev) => {
+      const next = { ...prev };
+      delete next[trimmed];
+      return next;
+    });
     setScores((prev) =>
       prev.map((row) => {
         const { [trimmed]: _, ...rest } = row.scores;
@@ -385,6 +412,10 @@ export function AppProvider({ children }: AppProviderProps) {
           [next]: currentParticipants,
         };
       });
+      setTeamStyles((prev) => {
+        const { [trimmed]: currentStyle, ...rest } = prev;
+        return currentStyle ? { ...rest, [next]: currentStyle } : rest;
+      });
       setScores((prev) =>
         prev.map((row) => {
           const { [trimmed]: currentScore, ...rest } = row.scores;
@@ -405,6 +436,10 @@ export function AppProvider({ children }: AppProviderProps) {
     },
     [scoreColumns],
   );
+
+  const setTeamStyle = useCallback((teamName: string, style: TeamStyle) => {
+    setTeamStyles((prev) => ({ ...prev, [teamName.trim()]: style }));
+  }, []);
 
   const reorderScoreColumns = useCallback((newOrder: string[]) => {
     if (!newOrder.length) return;
@@ -483,6 +518,8 @@ export function AppProvider({ children }: AppProviderProps) {
       scores,
       scoreColumns,
       participantsByTeam,
+      teamStyles,
+      setTeamStyle,
       updateScore,
       addTeam,
       renameScoreColumn,
@@ -497,6 +534,7 @@ export function AppProvider({ children }: AppProviderProps) {
       addRosterPlayer,
       removeRosterPlayer,
       themeMode,
+      isThemeReady,
       colors,
       toggleTheme,
       selectedAlarmId,
@@ -511,6 +549,8 @@ export function AppProvider({ children }: AppProviderProps) {
       scores,
       scoreColumns,
       participantsByTeam,
+      teamStyles,
+      setTeamStyle,
       updateScore,
       addTeam,
       renameScoreColumn,
@@ -525,6 +565,7 @@ export function AppProvider({ children }: AppProviderProps) {
       addRosterPlayer,
       removeRosterPlayer,
       themeMode,
+      isThemeReady,
       colors,
       toggleTheme,
       selectedAlarmId,

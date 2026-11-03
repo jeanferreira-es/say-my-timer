@@ -1,5 +1,4 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
 import { useMemo, useRef, useState } from "react";
 import {
   KeyboardAvoidingView,
@@ -26,7 +25,6 @@ function splitPlayerNames(value: string): string[] {
 
 export default function PlayersScreen() {
   const insets = useSafeAreaInsets();
-  const router = useRouter();
   const {
     addRosterPlayer,
     colors,
@@ -73,38 +71,13 @@ export default function PlayersScreen() {
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       style={[styles.screen, { backgroundColor: colors.background }]}
     >
-      <View
-        style={[
-          styles.header,
-          {
-            borderBottomColor: colors.border,
-            paddingTop: Math.max(insets.top, 18) + 26,
-          },
-        ]}
-      >
-        <TouchableOpacity
-          style={[
-            styles.backButton,
-            { borderColor: colors.border, backgroundColor: colors.surface },
-          ]}
-          onPress={() => router.back()}
-          activeOpacity={0.8}
-        >
-          <Ionicons name="arrow-back" size={20} color={colors.text} />
-        </TouchableOpacity>
-        <View style={styles.titleBlock}>
-          <Text style={[styles.eyebrow, { color: colors.text }]}>
-            Jogadores
-          </Text>
-          <Text style={[styles.title, { color: colors.text }]}>
-            {rosterPlayers.length === 0
-              ? "Nenhum jogador cadastrado"
-              : rosterPlayers.length === 1
-                ? "1 jogador cadastrado"
-                : `${rosterPlayers.length} jogadores cadastrados`}
-          </Text>
-        </View>
-      </View>
+      <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+        {rosterPlayers.length === 0
+          ? "Nenhum jogador cadastrado"
+          : rosterPlayers.length === 1
+            ? "1 jogador cadastrado"
+            : `${rosterPlayers.length} jogadores cadastrados`}
+      </Text>
 
       <View style={styles.form}>
         <View style={styles.inputRow}>
@@ -234,36 +207,11 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
   },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
+  subtitle: {
+    fontSize: 15,
+    lineHeight: 22,
     paddingHorizontal: 20,
-    paddingBottom: 20,
-    borderBottomWidth: 1,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 2,
-  },
-  titleBlock: {
-    flex: 1,
-    minWidth: 0,
-  },
-  eyebrow: {
-    fontSize: 20,
-    fontWeight: "400",
-    lineHeight: 25,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: "800",
-    lineHeight: 34,
+    paddingTop: 8,
   },
   form: {
     paddingHorizontal: 20,

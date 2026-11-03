@@ -4,14 +4,7 @@ import {
   setAudioModeAsync,
   type AudioPlayer,
 } from "expo-audio";
-import { useRouter } from "expo-router";
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ScrollView,
   StyleSheet,
@@ -19,24 +12,70 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import Animated, {
+  cancelAnimation,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from "react-native-reanimated";
 import { ALARM_OPTIONS, ALARM_SOUNDS, type AlarmId } from "../config/alarms";
-import { useApp } from "../context/AppContext";
+import { type ThemeColors, useApp } from "../context/AppContext";
+
+interface SoundBadgeProps {
+  colors: ThemeColors;
+  isSelected: boolean;
+  isPlaying: boolean;
+}
+
+// Ícone à esquerda do card; pulsa enquanto a prévia toca
+function SoundBadge({ colors, isPlaying, isSelected }: SoundBadgeProps) {
+  const pulse = useSharedValue(1);
+
+  useEffect(() => {
+    if (isPlaying) {
+      pulse.value = withRepeat(withTiming(0.4, { duration: 450 }), -1, true);
+    } else {
+      cancelAnimation(pulse);
+      pulse.value = 1;
+    }
+  }, [isPlaying, pulse]);
+
+  const pulseStyle = useAnimatedStyle(() => ({ opacity: pulse.value }));
+
+  return (
+    <View
+      style={[
+        styles.soundBadge,
+        { backgroundColor: isSelected ? colors.accent : colors.background },
+      ]}
+    >
+      <Animated.View style={pulseStyle}>
+        <Ionicons
+          name={isPlaying ? "volume-high" : "musical-note"}
+          size={20}
+          color={isSelected ? "#fff" : colors.textSecondary}
+        />
+      </Animated.View>
+    </View>
+  );
+}
 
 export default function AlarmSettingsScreen() {
-  const router = useRouter();
   const { colors, selectedAlarmId, setSelectedAlarmId } = useApp();
   const [previewingId, setPreviewingId] = useState<AlarmId | null>(null);
   const previewSoundRef = useRef<AudioPlayer | null>(null);
+  // Só a prévia pedida por último pode tocar, mesmo com toques rápidos seguidos
+  const previewRequestRef = useRef(0);
 
   const stopPreview = useCallback(async () => {
     try {
       const sound = previewSoundRef.current;
       if (sound) {
-        sound.pause();
-        await sound.seekTo(0);
-        sound.removeAllListeners("playbackStatusUpdate");
-        sound.remove();
         previewSoundRef.current = null;
+        sound.removeAllListeners("playbackStatusUpdate");
+        sound.pause();
+        sound.remove();
       }
       setPreviewingId(null);
     } catch {
@@ -46,7 +85,7 @@ export default function AlarmSettingsScreen() {
 
   const playPreview = useCallback(
     async (alarmId: AlarmId) => {
-      const source = ALARM_SOUNDS[alarmId];
+      const requestId = ++previewRequestRef.current;
       try {
         await stopPreview();
         await setAudioModeAsync({
@@ -54,15 +93,18 @@ export default function AlarmSettingsScreen() {
           interruptionMode: "duckOthers",
           shouldPlayInBackground: false,
         });
+        if (requestId !== previewRequestRef.current) return;
         setPreviewingId(alarmId);
-        const sound = createAudioPlayer(source);
+        const sound = createAudioPlayer(ALARM_SOUNDS[alarmId]);
         previewSoundRef.current = sound;
         sound.addListener("playbackStatusUpdate", (status) => {
           if (status.isLoaded && status.didJustFinish && !status.loop) {
             sound.removeAllListeners("playbackStatusUpdate");
             sound.remove();
-            previewSoundRef.current = null;
-            setPreviewingId(null);
+            if (previewSoundRef.current === sound) {
+              previewSoundRef.current = null;
+              setPreviewingId(null);
+            }
           }
         });
         sound.play();
@@ -77,209 +119,135 @@ export default function AlarmSettingsScreen() {
 
   useEffect(() => {
     return () => {
+      previewRequestRef.current++;
       void stopPreview();
     };
   }, [stopPreview]);
 
-  const handleGoBack = useCallback(async () => {
-    await stopPreview();
-    router.back();
-  }, [router, stopPreview]);
-
-  const themedStyles = useMemo(
-    () => ({
-      container: {
-        ...styles.containerBase,
-        backgroundColor: colors.background,
-      },
-      header: { ...styles.headerBase, borderBottomColor: colors.border },
-      backButton: {
-        ...styles.backButtonBase,
-        borderColor: colors.border,
-        backgroundColor: colors.surface,
-      },
-      title: { ...styles.titleBase, color: colors.text },
-      subtitle: { ...styles.subtitleBase, color: colors.textSecondary },
-      listContent: { ...styles.listContentBase, paddingBottom: 40 },
-      optionCard: {
-        ...styles.optionCardBase,
-        backgroundColor: colors.card,
-        borderColor: colors.border,
-      },
-      optionRow: { ...styles.optionRowBase },
-      optionText: { ...styles.optionTextBase, color: colors.text },
-      optionHint: { ...styles.optionHintBase, color: colors.textSecondary },
-      previewButton: {
-        ...styles.previewButtonBase,
-        backgroundColor: colors.accent,
-      },
-      previewButtonStop: { backgroundColor: colors.primary },
-      radioOuter: { ...styles.radioOuterBase, borderColor: colors.border },
-      radioOuterSelected: { borderColor: colors.accent },
-      radioInner: { ...styles.radioInnerBase, backgroundColor: colors.accent },
-    }),
-    [colors],
+  // Um toque seleciona e toca a prévia; tocar de novo no que está tocando para
+  const handlePress = useCallback(
+    (alarmId: AlarmId) => {
+      setSelectedAlarmId(alarmId);
+      if (previewingId === alarmId) {
+        previewRequestRef.current++;
+        void stopPreview();
+        return;
+      }
+      void playPreview(alarmId);
+    },
+    [playPreview, previewingId, setSelectedAlarmId, stopPreview],
   );
 
   return (
-    <View style={themedStyles.container}>
-      <View style={themedStyles.header}>
-        <TouchableOpacity
-          style={themedStyles.backButton}
-          onPress={handleGoBack}
-          activeOpacity={0.8}
-        >
-          <Ionicons name="arrow-back" size={20} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={themedStyles.title}>Som do alarme</Text>
-      </View>
+    <ScrollView
+      style={{ backgroundColor: colors.background }}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+    >
+      <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
+        Escolha o som tocado ao fim do cronômetro de 30 segundos. Toque em um
+        som para ouvir.
+      </Text>
 
-      <ScrollView
-        contentContainerStyle={themedStyles.listContent}
-        showsVerticalScrollIndicator={false}
-      >
-        <Text style={themedStyles.subtitle}>
-          Escolha o som tocado ao finalizar o cronometro de 30 segundos.
-        </Text>
+      <View style={styles.optionsList} accessibilityRole="radiogroup">
         {ALARM_OPTIONS.map((option) => {
           const isSelected = selectedAlarmId === option.id;
-          const isPreviewing = previewingId === option.id;
+          const isPlaying = previewingId === option.id;
 
           return (
             <TouchableOpacity
               key={option.id}
-              style={[
-                themedStyles.optionCard,
-                isSelected && { backgroundColor: colors.surface },
-              ]}
               activeOpacity={0.8}
-              onPress={() => setSelectedAlarmId(option.id)}
+              onPress={() => handlePress(option.id)}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: isSelected }}
+              accessibilityLabel={option.label}
+              accessibilityHint={
+                isPlaying
+                  ? "Toque para parar a prévia"
+                  : "Toque para selecionar e ouvir"
+              }
+              style={[
+                styles.optionCard,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: isSelected ? colors.accent : colors.border,
+                },
+              ]}
             >
-              <View style={themedStyles.optionRow}>
-                <View
-                  style={[
-                    themedStyles.radioOuter,
-                    isSelected && themedStyles.radioOuterSelected,
-                  ]}
-                >
-                  {isSelected && <View style={themedStyles.radioInner} />}
-                </View>
-
-                <View style={styles.optionTextWrapper}>
-                  <Text style={themedStyles.optionText}>{option.label}</Text>
-                  <Text style={themedStyles.optionHint}>
-                    {isSelected ? "Selecionado" : "Toque para selecionar"}
-                  </Text>
-                </View>
-
-                <TouchableOpacity
-                  style={[
-                    themedStyles.previewButton,
-                    isPreviewing && themedStyles.previewButtonStop,
-                  ]}
-                  activeOpacity={0.8}
-                  onPress={() => {
-                    if (isPreviewing) {
-                      void stopPreview();
-                      return;
-                    }
-                    void playPreview(option.id);
-                  }}
-                >
-                  <Ionicons
-                    name={isPreviewing ? "stop" : "play"}
-                    size={20}
-                    color="#fff"
-                  />
-                </TouchableOpacity>
-              </View>
+              <SoundBadge
+                colors={colors}
+                isSelected={isSelected}
+                isPlaying={isPlaying}
+              />
+              <Text
+                style={[
+                  styles.optionText,
+                  { color: colors.text },
+                  isSelected && styles.optionTextSelected,
+                ]}
+              >
+                {option.label}
+              </Text>
+              {isPlaying ? (
+                <Text style={[styles.playingHint, { color: colors.textTertiary }]}>
+                  Tocando
+                </Text>
+              ) : null}
+              <Ionicons
+                name={isSelected ? "checkmark-circle" : "ellipse-outline"}
+                size={24}
+                color={isSelected ? colors.accent : colors.border}
+              />
             </TouchableOpacity>
           );
         })}
-      </ScrollView>
-    </View>
+      </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  containerBase: {
-    flex: 1,
+  content: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 40,
   },
-  headerBase: {
+  subtitle: {
+    fontSize: 14,
+    lineHeight: 20,
+    paddingHorizontal: 16,
+    marginBottom: 20,
+  },
+  optionsList: {
+    gap: 10,
+  },
+  optionCard: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    paddingTop: 56,
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-    borderBottomWidth: 1,
+    gap: 14,
+    borderRadius: 24,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
-  backButtonBase: {
+  soundBadge: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 2,
   },
-  headerText: {
+  optionText: {
     flex: 1,
-  },
-  titleBase: {
-    fontSize: 24,
-    fontWeight: "700",
-  },
-  subtitleBase: {
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 6,
-  },
-  listContentBase: {
-    padding: 20,
-    gap: 12,
-  },
-  optionCardBase: {
-    borderWidth: 1,
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  optionRowBase: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  optionTextWrapper: {
-    flex: 1,
-    marginLeft: 14,
-    marginRight: 12,
-  },
-  optionTextBase: {
     fontSize: 16,
     fontWeight: "600",
   },
-  optionHintBase: {
-    fontSize: 13,
-    marginTop: 4,
+  optionTextSelected: {
+    fontWeight: "700",
   },
-  previewButtonBase: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  radioOuterBase: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 2,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  radioInnerBase: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+  playingHint: {
+    fontSize: 12,
+    fontWeight: "600",
   },
 });
