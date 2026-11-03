@@ -36,6 +36,9 @@ import {
 import Animated, {
   cancelAnimation,
   Easing,
+  FadeInRight,
+  FadeOutRight,
+  LinearTransition,
   type SharedValue,
   useAnimatedProps,
   useAnimatedStyle,
@@ -44,6 +47,7 @@ import Animated, {
 } from "react-native-reanimated";
 import Svg, { G, Path } from "react-native-svg";
 
+import { ScoresPanel } from "@/components/ScoresPanel";
 import {
   INITIAL_TURN,
   type Turn,
@@ -61,6 +65,11 @@ const DURATION_MS = 400;
 const DOUBLE_TAP_MS = 350;
 const REWIND_MS = 500;
 const PRIMARY_TIMER_SECONDS = 30;
+// Telas a partir desse lado menor mostram a pontuação ao lado dos timers
+const TABLET_MIN_SIDE = 600;
+// Espera antes de mostrar o painel, para não piscar na troca do timer de
+// preparação para o de 30s
+const SCORES_PANEL_DELAY_MS = 350;
 
 type TimerSize = "large" | "small";
 type TimerSeconds = number;
@@ -650,8 +659,13 @@ export default function HomeScreen() {
     secondaryTimerSeconds,
     scoreColumns,
     participantsByTeam,
+    setLastPlayedTeam,
+    openScoresAfterTurn,
   } = useApp();
+  const { width, height } = useWindowDimensions();
+  const isTablet = Math.min(width, height) >= TABLET_MIN_SIDE;
   const [expandedTimer, setExpandedTimer] = useState<TimerId | null>(null);
+  const [settledTimer, setSettledTimer] = useState<TimerId | null>(null);
   const [isAlarmPlaying, setIsAlarmPlaying] = useState<boolean>(false);
   const [turn, setTurn] = useState<Turn>(INITIAL_TURN);
   const [isRestartOrderConfirmOpen, setIsRestartOrderConfirmOpen] =
@@ -675,10 +689,33 @@ export default function HomeScreen() {
   // Refs para os callbacks dos timers sempre usarem os times atuais.
   const teamsRef = useRef({ scoreColumns, participantsByTeam });
   teamsRef.current = { scoreColumns, participantsByTeam };
+  const currentTeamRef = useRef<string | null>(null);
+  useEffect(() => {
+    currentTeamRef.current = currentTurn?.team ?? null;
+  }, [currentTurn]);
   const advanceTurn = useCallback(() => {
+    // A pontuação da partida vai, por padrão, para quem acabou de jogar
+    const playedTeam = currentTeamRef.current;
+    setLastPlayedTeam(playedTeam);
     const { scoreColumns: order, participantsByTeam: players } = teamsRef.current;
     setTurn((current) => nextTurn(current, order, players));
-  }, []);
+    // No tablet a pontuação já aparece ao lado; no celular, abre se pedido
+    if (playedTeam && !isTablet && openScoresAfterTurn) {
+      router.push("/score");
+    }
+  }, [isTablet, openScoresAfterTurn, router, setLastPlayedTeam]);
+
+  // No tablet, a pontuação fica ao lado: some assim que um timer roda e só
+  // volta quando nenhum timer ficou rodando durante o atraso
+  useEffect(() => {
+    const timeout = setTimeout(
+      () => setSettledTimer(expandedTimer),
+      SCORES_PANEL_DELAY_MS,
+    );
+    return () => clearTimeout(timeout);
+  }, [expandedTimer]);
+  const showScoresPanel =
+    isTablet && expandedTimer === null && settledTimer === null;
 
   const handleRestartTimers = useCallback(() => {
     setExpandedTimer(null);
@@ -834,174 +871,199 @@ export default function HomeScreen() {
   );
 
   return (
-    <View style={themedStyles.container}>
-      <View style={styles.playerCalloutWrapper}>
-        <Text
-          style={[styles.playerCalloutLabel, { color: colors.textSecondary }]}
-        >
-          Agora na vez de
-        </Text>
-        <Text
-          style={[styles.playerCalloutName, { color: colors.accent }]}
-          numberOfLines={1}
-          ellipsizeMode="tail"
-        >
-          {currentPlayerName ?? "—"}
-        </Text>
-        {!hasPlayers ? (
+    <View style={[styles.screenRow, { backgroundColor: colors.background }]}>
+      <Animated.View
+        layout={LinearTransition.duration(300)}
+        style={themedStyles.container}
+      >
+        <View style={styles.playerCalloutWrapper}>
           <Text
-            style={[styles.playerCalloutHint, { color: colors.textTertiary }]}
+            style={[styles.playerCalloutLabel, { color: colors.textSecondary }]}
           >
-            Adicione times e jogadores em Pontuações
+            Agora na vez de
           </Text>
-        ) : activeTeamsCount < 2 ? (
           <Text
-            style={[styles.playerCalloutHint, { color: colors.textTertiary }]}
-          >
-            Cadastre pelo menos 2 times com jogadores para alternar a vez
-          </Text>
-        ) : (
-          <Text
-            style={[styles.playerCalloutHint, { color: colors.textTertiary }]}
+            style={[styles.playerCalloutName, { color: colors.accent }]}
             numberOfLines={1}
+            ellipsizeMode="tail"
           >
-            {currentTurn.team}
+            {currentPlayerName ?? "—"}
           </Text>
-        )}
-      </View>
+          {!hasPlayers ? (
+            <Text
+              style={[styles.playerCalloutHint, { color: colors.textTertiary }]}
+            >
+              Adicione times e jogadores em Pontuações
+            </Text>
+          ) : activeTeamsCount < 2 ? (
+            <Text
+              style={[styles.playerCalloutHint, { color: colors.textTertiary }]}
+            >
+              Cadastre pelo menos 2 times com jogadores para alternar a vez
+            </Text>
+          ) : (
+            <Text
+              style={[styles.playerCalloutHint, { color: colors.textTertiary }]}
+              numberOfLines={1}
+            >
+              {currentTurn.team}
+            </Text>
+          )}
+        </View>
 
-      <View style={styles.topBar}>
-        <TouchableOpacity
-          onPress={() => router.push("/alarm" as never)}
-          activeOpacity={0.8}
-          style={themedStyles.topBarButton}
-        >
-          <Feather name="volume-2" size={22} color={colors.text} />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={themedStyles.topBarButton}
-          onPress={() => router.push("/score" as never)}
-          activeOpacity={0.8}
-        >
-          <Octicons name="trophy" size={20} color={colors.text} />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={themedStyles.topBarButton}
-          onPress={toggleTheme}
-          activeOpacity={0.8}
-        >
-          <Feather
-            name={themeMode === "dark" ? "sun" : "moon"}
-            size={22}
-            color={colors.text}
-          />
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.timersRow}>
-        <View style={styles.timerControlsRow}>
+        <View style={styles.topBar}>
           <TouchableOpacity
-            onPress={() => setIsRestartOrderConfirmOpen(true)}
+            onPress={() => router.push("/alarm" as never)}
             activeOpacity={0.8}
-            disabled={isRestartOrderDisabled}
-            style={[
-              isRestartOrderDisabled && styles.timerControlButtonDisabled,
-            ]}
+            style={themedStyles.topBarButton}
           >
-            <Ionicons name="play-skip-back" size={30} color={colors.text} />
+            <Feather name="volume-2" size={22} color={colors.text} />
           </TouchableOpacity>
           <TouchableOpacity
-            onPress={handlePreviousPlayer}
+            style={themedStyles.topBarButton}
+            onPress={() => router.push("/score" as never)}
             activeOpacity={0.8}
-            disabled={!hasPlayers || isAtFirstTurn}
-            style={[
-              (!hasPlayers || isAtFirstTurn) &&
-                styles.timerControlButtonDisabled,
-            ]}
           >
-            <Ionicons name="play-back" size={32} color={colors.text} />
+            <Octicons name="trophy" size={20} color={colors.text} />
           </TouchableOpacity>
           <TouchableOpacity
-            onPress={handleRestartTimers}
+            style={themedStyles.topBarButton}
+            onPress={toggleTheme}
             activeOpacity={0.8}
-            disabled={!expandedTimer}
-            style={[!expandedTimer && styles.timerControlButtonDisabled]}
           >
-            <Ionicons name="refresh" size={40} color={colors.text} />
+            <Feather
+              name={themeMode === "dark" ? "sun" : "moon"}
+              size={22}
+              color={colors.text}
+            />
           </TouchableOpacity>
         </View>
-        <TimerCircle
-          timerId="primary"
-          ref={timer30Ref}
-          seconds={PRIMARY_TIMER_SECONDS}
-          size="large"
-          expanded={expandedTimer === "primary"}
-          onRunningChange={handleRunningChange}
-          onComplete={handle30sComplete}
-          resetOnComplete
-          onPressAction={() => {
-            timer15Ref.current?.reset();
-            void stopAlarm();
-          }}
-          onDoubleTap={handleFinishTurn}
-          colors={colors}
-        />
-        <View style={styles.secondaryTimerRow}>
+
+        <View style={styles.timersRow}>
+          <View style={styles.timerControlsRow}>
+            <TouchableOpacity
+              onPress={() => setIsRestartOrderConfirmOpen(true)}
+              activeOpacity={0.8}
+              disabled={isRestartOrderDisabled}
+              style={[
+                isRestartOrderDisabled && styles.timerControlButtonDisabled,
+              ]}
+            >
+              <Ionicons name="play-skip-back" size={30} color={colors.text} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handlePreviousPlayer}
+              activeOpacity={0.8}
+              disabled={!hasPlayers || isAtFirstTurn}
+              style={[
+                (!hasPlayers || isAtFirstTurn) &&
+                  styles.timerControlButtonDisabled,
+              ]}
+            >
+              <Ionicons name="play-back" size={32} color={colors.text} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleRestartTimers}
+              activeOpacity={0.8}
+              disabled={!expandedTimer}
+              style={[!expandedTimer && styles.timerControlButtonDisabled]}
+            >
+              <Ionicons name="refresh" size={40} color={colors.text} />
+            </TouchableOpacity>
+          </View>
           <TimerCircle
-            timerId="secondary"
-            ref={timer15Ref}
-            seconds={secondaryTimerSeconds}
-            size="small"
-            expanded={expandedTimer === "secondary"}
+            timerId="primary"
+            ref={timer30Ref}
+            seconds={PRIMARY_TIMER_SECONDS}
+            size="large"
+            expanded={expandedTimer === "primary"}
             onRunningChange={handleRunningChange}
-            onComplete={handle15sComplete}
+            onComplete={handle30sComplete}
+            resetOnComplete
             onPressAction={() => {
-              timer30Ref.current?.reset();
+              timer15Ref.current?.reset();
+              void stopAlarm();
             }}
+            onDoubleTap={handleFinishTurn}
             colors={colors}
           />
-          <TouchableOpacity
-            style={[
-              styles.editTimerButton,
-              {
-                backgroundColor: colors.surface,
-                position: "absolute",
-                right: -60,
-              },
-            ]}
-            onPress={() => router.push("/edit-time" as never)}
-            activeOpacity={0.8}
-          >
-            <FontAwesome6 name="pen" size={20} color={colors.text} />
-          </TouchableOpacity>
+          <View style={styles.secondaryTimerRow}>
+            <TimerCircle
+              timerId="secondary"
+              ref={timer15Ref}
+              seconds={secondaryTimerSeconds}
+              size="small"
+              expanded={expandedTimer === "secondary"}
+              onRunningChange={handleRunningChange}
+              onComplete={handle15sComplete}
+              onPressAction={() => {
+                timer30Ref.current?.reset();
+              }}
+              colors={colors}
+            />
+            <TouchableOpacity
+              style={[
+                styles.editTimerButton,
+                {
+                  backgroundColor: colors.surface,
+                  position: "absolute",
+                  right: -60,
+                },
+              ]}
+              onPress={() => router.push("/edit-time" as never)}
+              activeOpacity={0.8}
+            >
+              <FontAwesome6 name="pen" size={20} color={colors.text} />
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
 
-      <TouchableOpacity
-        onPress={() => router.push("/teams" as never)}
-        activeOpacity={0.85}
-        style={[
-          styles.teamsFab,
-          { backgroundColor: colors.primary, shadowColor: "#000" },
-        ]}
-      >
-        <FontAwesome6 name="chess-knight" size={22} color={colors.background} />
-      </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => router.push("/teams" as never)}
+          activeOpacity={0.85}
+          style={[
+            styles.teamsFab,
+            { backgroundColor: colors.primary, shadowColor: "#000" },
+          ]}
+        >
+          <FontAwesome6 name="chess-knight" size={22} color={colors.background} />
+        </TouchableOpacity>
 
-      <ConfirmDialog
-        visible={isRestartOrderConfirmOpen}
-        title="Reiniciar ordem?"
-        message={`A vez volta para ${getTurnPlayer(INITIAL_TURN, scoreColumns, participantsByTeam)?.player ?? "o primeiro jogador"}, o primeiro da ordem definida em Times.`}
-        confirmLabel="Reiniciar"
-        onConfirm={handleRestartOrder}
-        onCancel={() => setIsRestartOrderConfirmOpen(false)}
-        colors={colors}
-      />
+        <ConfirmDialog
+          visible={isRestartOrderConfirmOpen}
+          title="Reiniciar ordem?"
+          message={`A vez volta para ${getTurnPlayer(INITIAL_TURN, scoreColumns, participantsByTeam)?.player ?? "o primeiro jogador"}, o primeiro da ordem definida em Times.`}
+          confirmLabel="Reiniciar"
+          onConfirm={handleRestartOrder}
+          onCancel={() => setIsRestartOrderConfirmOpen(false)}
+          colors={colors}
+        />
+      </Animated.View>
+      {showScoresPanel ? (
+        <Animated.View
+          entering={FadeInRight.duration(250)}
+          exiting={FadeOutRight.duration(200)}
+          style={[
+            styles.scoresPanel,
+            { width: Math.min(460, width * 0.42), borderColor: colors.border },
+          ]}
+        >
+          <ScoresPanel compact />
+        </Animated.View>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  screenRow: {
+    flex: 1,
+    flexDirection: "row",
+  },
+  scoresPanel: {
+    borderLeftWidth: 1,
+    paddingTop: 24,
+  },
   containerBase: {
     flex: 1,
     paddingTop: 60,

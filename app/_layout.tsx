@@ -9,13 +9,15 @@ import {
   type Theme,
 } from "@react-navigation/native";
 import { Stack, useRouter } from "expo-router";
+import * as ScreenOrientation from "expo-screen-orientation";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import * as SystemUI from "expo-system-ui";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Animated,
   Appearance,
+  Dimensions,
   StyleSheet,
   TouchableOpacity,
   View,
@@ -30,6 +32,14 @@ export const unstable_settings = {
 };
 
 SplashScreen.preventAutoHideAsync();
+
+// Só tablets giram (pontuação ao lado dos timers); celulares ficam em retrato
+const screen = Dimensions.get("screen");
+if (Math.min(screen.width, screen.height) < 600) {
+  ScreenOrientation.lockAsync(
+    ScreenOrientation.OrientationLock.PORTRAIT_UP,
+  ).catch(() => {});
+}
 
 const SPLASH_FADE_MS = 250;
 
@@ -75,18 +85,18 @@ function NativeThemeSync() {
 // Cobre o app com a splash até o tema salvo carregar e depois some suavemente,
 // em vez de trocar de cor de uma vez
 function SplashOverlay() {
-  const { isThemeReady } = useApp();
-  const opacity = useRef(new Animated.Value(1)).current;
+  const { isHydrated } = useApp();
+  const [opacity] = useState(() => new Animated.Value(1));
   const [visible, setVisible] = useState(true);
 
   useEffect(() => {
-    if (!isThemeReady) return;
+    if (!isHydrated) return;
     Animated.timing(opacity, {
       toValue: 0,
       duration: SPLASH_FADE_MS,
       useNativeDriver: true,
     }).start(() => setVisible(false));
-  }, [isThemeReady, opacity]);
+  }, [isHydrated, opacity]);
 
   if (!visible) return null;
   return (
@@ -186,6 +196,7 @@ function ThemedStack() {
         />
         <Stack.Screen name="alarm" options={{ title: "Som do alarme" }} />
         <Stack.Screen name="score" options={{ title: "Pontuações" }} />
+        <Stack.Screen name="history" options={{ title: "Histórico" }} />
         <Stack.Screen name="draw" options={{ title: "Sortear" }} />
         <Stack.Screen name="players" options={{ title: "Jogadores" }} />
         <Stack.Screen

@@ -56,6 +56,9 @@ const PLAYER_NAME_HISTORY_KEY = "playerNameHistory";
 const ROSTER_PLAYERS_KEY = "rosterPlayers";
 const SELECTED_ALARM_KEY = "selectedAlarmId";
 const THEME_MODE_KEY = "themeMode";
+const CURRENT_MATCH_KEY = "currentMatch";
+const MATCH_HISTORY_KEY = "matchHistory";
+const OPEN_SCORES_AFTER_TURN_KEY = "openScoresAfterTurn";
 
 export interface AppContextValue {
   counter: number;
@@ -68,6 +71,23 @@ export interface AppContextValue {
   teamStyles: Record<string, TeamStyle>;
   setTeamStyle: (teamName: string, style: TeamStyle) => void;
   updateScore: (rowId: string, column: string, value: string) => void;
+  // Rodada em andamento: os pontos de cada partida acumulam por time e só vão
+  // para a tabela ao finalizar a rodada. null = todas as rodadas finalizadas.
+  currentRoundId: string | null;
+  setCurrentRoundId: (roundId: string | null) => void;
+  roundPoints: Record<string, number>;
+  addRoundPoints: (teamName: string, points: number) => void;
+  undoRoundPoints: () => void;
+  canUndoRoundPoints: boolean;
+  finishRound: () => void;
+  // Guarda a partida no histórico (se alguém pontuou) e zera a tabela,
+  // mantendo os times. Retorna se a partida foi guardada.
+  finishMatch: () => boolean;
+  matchHistory: MatchRecord[];
+  removeMatchFromHistory: (matchId: string) => void;
+  // Time da última partida jogada, alvo padrão dos pontos acumulados
+  lastPlayedTeam: string | null;
+  setLastPlayedTeam: (teamName: string | null) => void;
   // As funções de times retornam a mensagem de erro, ou null em caso de sucesso.
   addTeam: (teamName: string, players: string[]) => string | null;
   renameScoreColumn: (teamName: string, nextName: string) => string | null;
@@ -86,14 +106,49 @@ export interface AppContextValue {
   addRosterPlayer: (name: string) => boolean;
   removeRosterPlayer: (name: string) => void;
   themeMode: ThemeMode;
-  isThemeReady: boolean;
+  isHydrated: boolean;
   colors: ThemeColors;
   toggleTheme: () => void;
   selectedAlarmId: AlarmId;
   setSelectedAlarmId: (id: AlarmId) => void;
+  // Celular: abre a pontuação sozinha quando a partida de um time termina
+  openScoresAfterTurn: boolean;
+  setOpenScoresAfterTurn: (enabled: boolean) => void;
   secondaryTimerSeconds: number;
   setSecondaryTimerSeconds: (seconds: number) => void;
 }
+
+interface RoundEntry {
+  team: string;
+  points: number;
+}
+
+// Partida encerrada, guardada no histórico com os pontos de cada rodada
+export interface MatchRecord {
+  id: string;
+  finishedAt: number;
+  rounds: string[];
+  teams: {
+    name: string;
+    players: string[];
+    style?: TeamStyle;
+    scores: Record<string, number>;
+    total: number;
+  }[];
+}
+
+// Tudo o que é preciso para retomar a partida ao reabrir o app
+interface StoredMatch {
+  scoreColumns: string[];
+  participantsByTeam: Record<string, string[]>;
+  teamStyles: Record<string, TeamStyle>;
+  scores: ScoreRow[];
+  currentRoundId: string | null;
+  roundEntries: RoundEntry[];
+  lastPlayedTeam: string | null;
+}
+
+export const TOTAL_ROW_ID = "Total";
 
 const defaultScores: ScoreRow[] = [
   { id: "1ª Rodada", scores: {} },
@@ -151,9 +206,20 @@ export function AppProvider({ children }: AppProviderProps) {
     Record<string, string[]>
   >({});
   const [teamStyles, setTeamStyles] = useState<Record<string, TeamStyle>>({});
+  const [currentRoundId, setCurrentRoundId] = useState<string | null>(
+    defaultScores[0].id,
+  );
+  // Cada ponto lançado na rodada, em ordem, para permitir desfazer o último
+  const [roundEntries, setRoundEntries] = useState<RoundEntry[]>([]);
+  const [lastPlayedTeam, setLastPlayedTeam] = useState<string | null>(null);
+  const [matchHistory, setMatchHistory] = useState<MatchRecord[]>([]);
+  // Só salva depois de ler o que já estava salvo, para não sobrescrever com vazio
+  const [isMatchLoaded, setIsMatchLoaded] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>("dark");
-  // A splash só some depois de ler o tema salvo, para não abrir no tema errado
-  const [isThemeReady, setIsThemeReady] = useState(false);
+  const [isThemeLoaded, setIsThemeLoaded] = useState(false);
+  // A splash só some depois de ler tema e partida salvos, para o app não abrir
+  // no tema errado nem com a tabela vazia por um instante
+  const isHydrated = isThemeLoaded && isMatchLoaded;
   const [selectedAlarmId, setSelectedAlarmIdState] =
     useState<AlarmId>(DEFAULT_ALARM_ID);
   const alarmChosenBeforeLoad = useRef(false);
@@ -178,6 +244,26 @@ export function AppProvider({ children }: AppProviderProps) {
     alarmChosenBeforeLoad.current = true;
     setSelectedAlarmIdState(id);
     AsyncStorage.setItem(SELECTED_ALARM_KEY, id).catch(() => {});
+  }, []);
+
+  const [openScoresAfterTurn, setOpenScoresAfterTurnState] = useState(false);
+  const openScoresChosenBeforeLoad = useRef(false);
+
+  useEffect(() => {
+    AsyncStorage.getItem(OPEN_SCORES_AFTER_TURN_KEY)
+      .then((stored) => {
+        if (openScoresChosenBeforeLoad.current || stored === null) return;
+        setOpenScoresAfterTurnState(stored === "true");
+      })
+      .catch(() => {});
+  }, []);
+
+  const setOpenScoresAfterTurn = useCallback((enabled: boolean) => {
+    openScoresChosenBeforeLoad.current = true;
+    setOpenScoresAfterTurnState(enabled);
+    AsyncStorage.setItem(OPEN_SCORES_AFTER_TURN_KEY, String(enabled)).catch(
+      () => {},
+    );
   }, []);
 
   const [rosterPlayers, setRosterPlayers] = useState<string[]>([]);
@@ -321,7 +407,7 @@ export function AppProvider({ children }: AppProviderProps) {
         if (stored === "light" || stored === "dark") setThemeMode(stored);
       })
       .catch(() => {})
-      .finally(() => setIsThemeReady(true));
+      .finally(() => setIsThemeLoaded(true));
   }, []);
 
   const toggleTheme = useCallback(() => {
@@ -354,6 +440,148 @@ export function AppProvider({ children }: AppProviderProps) {
     [],
   );
 
+  useEffect(() => {
+    Promise.all([
+      AsyncStorage.getItem(CURRENT_MATCH_KEY),
+      AsyncStorage.getItem(MATCH_HISTORY_KEY),
+    ])
+      .then(([storedMatch, storedHistory]) => {
+        if (storedMatch) {
+          const match: StoredMatch = JSON.parse(storedMatch);
+          setScoreColumns(match.scoreColumns ?? []);
+          setParticipantsByTeam(match.participantsByTeam ?? {});
+          setTeamStyles(match.teamStyles ?? {});
+          // Mantém as rodadas atuais do app, mesmo que a lista mude numa versão futura
+          setScores(
+            defaultScores.map((row) => ({
+              ...row,
+              scores:
+                match.scores?.find((stored) => stored.id === row.id)?.scores ??
+                {},
+            })),
+          );
+          setCurrentRoundId(
+            match.currentRoundId === null ||
+              defaultScores.some((row) => row.id === match.currentRoundId)
+              ? match.currentRoundId
+              : defaultScores[0].id,
+          );
+          setRoundEntries(match.roundEntries ?? []);
+          setLastPlayedTeam(match.lastPlayedTeam ?? null);
+        }
+        if (storedHistory) setMatchHistory(JSON.parse(storedHistory));
+      })
+      .catch(() => {})
+      .finally(() => setIsMatchLoaded(true));
+  }, []);
+
+  useEffect(() => {
+    if (!isMatchLoaded) return;
+    const match: StoredMatch = {
+      scoreColumns,
+      participantsByTeam,
+      teamStyles,
+      scores,
+      currentRoundId,
+      roundEntries,
+      lastPlayedTeam,
+    };
+    AsyncStorage.setItem(CURRENT_MATCH_KEY, JSON.stringify(match)).catch(
+      () => {},
+    );
+  }, [
+    isMatchLoaded,
+    scoreColumns,
+    participantsByTeam,
+    teamStyles,
+    scores,
+    currentRoundId,
+    roundEntries,
+    lastPlayedTeam,
+  ]);
+
+  useEffect(() => {
+    if (!isMatchLoaded) return;
+    AsyncStorage.setItem(MATCH_HISTORY_KEY, JSON.stringify(matchHistory)).catch(
+      () => {},
+    );
+  }, [isMatchLoaded, matchHistory]);
+
+  const finishMatch = useCallback(() => {
+    const roundIds = scores
+      .map((row) => row.id)
+      .filter((id) => id !== TOTAL_ROW_ID);
+    const teams = scoreColumns.map((name) => {
+      const teamScores: Record<string, number> = {};
+      roundIds.forEach((roundId) => {
+        const row = scores.find((candidate) => candidate.id === roundId);
+        teamScores[roundId] = parseFloat(row?.scores[name] ?? "") || 0;
+      });
+      return {
+        name,
+        players: participantsByTeam[name] ?? [],
+        style: teamStyles[name],
+        scores: teamScores,
+        total: Object.values(teamScores).reduce((sum, value) => sum + value, 0),
+      };
+    });
+    const hasPoints = teams.some((team) => team.total !== 0);
+    if (hasPoints) {
+      const finishedAt = Date.now();
+      setMatchHistory((prev) => [
+        { id: String(finishedAt), finishedAt, rounds: roundIds, teams },
+        ...prev,
+      ]);
+    }
+    setScores(defaultScores);
+    setCurrentRoundId(defaultScores[0].id);
+    setRoundEntries([]);
+    setLastPlayedTeam(null);
+    return hasPoints;
+  }, [participantsByTeam, scoreColumns, scores, teamStyles]);
+
+  const removeMatchFromHistory = useCallback((matchId: string) => {
+    setMatchHistory((prev) => prev.filter((match) => match.id !== matchId));
+  }, []);
+
+  const roundPoints = useMemo(() => {
+    const totals: Record<string, number> = {};
+    roundEntries.forEach(({ team, points }) => {
+      totals[team] = (totals[team] ?? 0) + points;
+    });
+    return totals;
+  }, [roundEntries]);
+
+  const addRoundPoints = useCallback((teamName: string, points: number) => {
+    setRoundEntries((prev) => [...prev, { team: teamName, points }]);
+  }, []);
+
+  const undoRoundPoints = useCallback(() => {
+    setRoundEntries((prev) => prev.slice(0, -1));
+  }, []);
+
+  // Soma o acumulado ao que já estiver na tabela e passa para a próxima rodada
+  const finishRound = useCallback(() => {
+    if (!currentRoundId) return;
+    setScores((prev) =>
+      prev.map((row) => {
+        if (row.id !== currentRoundId) return row;
+        const nextScores = { ...row.scores };
+        Object.entries(roundPoints).forEach(([team, points]) => {
+          nextScores[team] = String(
+            (parseFloat(nextScores[team] ?? "") || 0) + points,
+          );
+        });
+        return { ...row, scores: nextScores };
+      }),
+    );
+    const roundIds = scores
+      .map((row) => row.id)
+      .filter((id) => id !== TOTAL_ROW_ID);
+    setCurrentRoundId(roundIds[roundIds.indexOf(currentRoundId) + 1] ?? null);
+    setRoundEntries([]);
+  }, [currentRoundId, roundPoints, scores]);
+
   const addTeam = useCallback(
     (teamName: string, players: string[]) => {
       const name = teamName.trim();
@@ -385,6 +613,8 @@ export function AppProvider({ children }: AppProviderProps) {
       delete next[trimmed];
       return next;
     });
+    setRoundEntries((prev) => prev.filter((entry) => entry.team !== trimmed));
+    setLastPlayedTeam((prev) => (prev === trimmed ? null : prev));
     setScores((prev) =>
       prev.map((row) => {
         const { [trimmed]: _, ...rest } = row.scores;
@@ -416,6 +646,12 @@ export function AppProvider({ children }: AppProviderProps) {
         const { [trimmed]: currentStyle, ...rest } = prev;
         return currentStyle ? { ...rest, [next]: currentStyle } : rest;
       });
+      setRoundEntries((prev) =>
+        prev.map((entry) =>
+          entry.team === trimmed ? { ...entry, team: next } : entry,
+        ),
+      );
+      setLastPlayedTeam((prev) => (prev === trimmed ? next : prev));
       setScores((prev) =>
         prev.map((row) => {
           const { [trimmed]: currentScore, ...rest } = row.scores;
@@ -521,6 +757,18 @@ export function AppProvider({ children }: AppProviderProps) {
       teamStyles,
       setTeamStyle,
       updateScore,
+      currentRoundId,
+      setCurrentRoundId,
+      roundPoints,
+      addRoundPoints,
+      undoRoundPoints,
+      canUndoRoundPoints: roundEntries.length > 0,
+      finishRound,
+      finishMatch,
+      matchHistory,
+      removeMatchFromHistory,
+      lastPlayedTeam,
+      setLastPlayedTeam,
       addTeam,
       renameScoreColumn,
       removeScoreColumn,
@@ -534,11 +782,13 @@ export function AppProvider({ children }: AppProviderProps) {
       addRosterPlayer,
       removeRosterPlayer,
       themeMode,
-      isThemeReady,
+      isHydrated,
       colors,
       toggleTheme,
       selectedAlarmId,
       setSelectedAlarmId,
+      openScoresAfterTurn,
+      setOpenScoresAfterTurn,
       secondaryTimerSeconds,
       setSecondaryTimerSeconds,
     }),
@@ -552,6 +802,16 @@ export function AppProvider({ children }: AppProviderProps) {
       teamStyles,
       setTeamStyle,
       updateScore,
+      currentRoundId,
+      roundPoints,
+      addRoundPoints,
+      undoRoundPoints,
+      roundEntries.length,
+      finishRound,
+      finishMatch,
+      matchHistory,
+      removeMatchFromHistory,
+      lastPlayedTeam,
       addTeam,
       renameScoreColumn,
       removeScoreColumn,
@@ -565,11 +825,13 @@ export function AppProvider({ children }: AppProviderProps) {
       addRosterPlayer,
       removeRosterPlayer,
       themeMode,
-      isThemeReady,
+      isHydrated,
       colors,
       toggleTheme,
       selectedAlarmId,
       setSelectedAlarmId,
+      openScoresAfterTurn,
+      setOpenScoresAfterTurn,
       secondaryTimerSeconds,
     ],
   );
