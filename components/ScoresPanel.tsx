@@ -23,16 +23,19 @@ import {
   teamTheme,
 } from "../utils/teamGradients";
 
-const QUICK_POINTS = [1, 2, 3, 4, 5];
-const DEFAULT_CUSTOM_POINTS = 6;
+const QUICK_POINTS = [1, 2, 3, 4, 5, 6];
+const DEFAULT_CUSTOM_POINTS = 7;
 // Rodadas que podem ser puladas sem pontuar
 const OPTIONAL_ROUND_IDS = new Set(["Rodada Relâmpago"]);
+// Linha de cima: valores rápidos; linha de baixo: o último rápido e o personalizado
+const QUICK_POINTS_TOP = QUICK_POINTS.slice(0, 4);
+const QUICK_POINTS_BOTTOM = QUICK_POINTS.slice(4);
 
 // "1ª Rodada" → "1ª", "Rodada Relâmpago" → "Relâmpago"
 export const shortRoundLabel = (roundId: string) =>
   roundId.replace(/\s*Rodada\s*/i, "").trim() || roundId;
 
-const formatPoints = (points: number) =>
+export const formatPoints = (points: number) =>
   points === 1 ? "1 ponto" : `${points} pontos`;
 
 interface TeamBadgeProps {
@@ -61,6 +64,208 @@ export function TeamBadge({ size, teamIndex, teamStyle }: TeamBadgeProps) {
   );
 }
 
+interface MatchPointsPickerProps {
+  colors: ThemeColors;
+  selectedTeam: string | null;
+  onSelectTeam: (team: string) => void;
+  onAdd: (points: number) => void;
+  // Trava a escolha, por exemplo depois que a partida já foi pontuada
+  disabled?: boolean;
+  // Destaca o valor já lançado
+  highlightedPoints?: number | null;
+}
+
+// Escolha do time e do valor a somar na partida, usada no painel e no modal
+export function MatchPointsPicker({
+  colors,
+  disabled = false,
+  highlightedPoints = null,
+  onAdd,
+  onSelectTeam,
+  selectedTeam,
+}: MatchPointsPickerProps) {
+  const { roundPoints, scoreColumns, teamStyles } = useApp();
+  const [customPoints, setCustomPoints] = useState(DEFAULT_CUSTOM_POINTS);
+  // Qual botão lançou o valor destacado, para não confundir o personalizado
+  // (ajustado para 3, por exemplo) com o botão rápido de mesmo valor
+  const [pressedCustom, setPressedCustom] = useState(false);
+  const changeCustomPoints = (delta: number) => {
+    setCustomPoints((value) => Math.max(1, value + delta));
+  };
+  const handleQuickAdd = (points: number) => {
+    setPressedCustom(false);
+    onAdd(points);
+  };
+  const handleCustomAdd = () => {
+    setPressedCustom(true);
+    onAdd(customPoints);
+  };
+  const canAdd = !disabled && selectedTeam !== null;
+  const isCustomHighlighted =
+    highlightedPoints !== null &&
+    (pressedCustom || !QUICK_POINTS.includes(highlightedPoints));
+
+  const renderQuickTile = (points: number) => {
+    const isHighlighted = !isCustomHighlighted && points === highlightedPoints;
+    return (
+      <TouchableOpacity
+        key={points}
+        activeOpacity={0.7}
+        disabled={!canAdd}
+        onPress={() => handleQuickAdd(points)}
+        accessibilityLabel={`Somar ${formatPoints(points)}`}
+        style={[
+          styles.pointTile,
+          styles.quickTile,
+          {
+            backgroundColor: isHighlighted ? colors.accent : colors.background,
+          },
+          disabled && !isHighlighted && styles.disabled,
+        ]}
+      >
+        <Text
+          style={[
+            styles.pointTileText,
+            { color: isHighlighted ? "#fff" : colors.text },
+          ]}
+        >
+          +{points}
+        </Text>
+      </TouchableOpacity>
+    );
+  };
+
+  return (
+    <>
+      <Text style={[styles.trackerLabel, { color: colors.textSecondary }]}>
+        Pontos da partida para
+      </Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.chipsRow}
+      >
+        {scoreColumns.map((team, teamIndex) => {
+          const isSelected = team === selectedTeam;
+          const pending = roundPoints[team] ?? 0;
+          return (
+            <TouchableOpacity
+              key={team}
+              activeOpacity={0.8}
+              disabled={disabled}
+              onPress={() => onSelectTeam(team)}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: isSelected, disabled }}
+              accessibilityLabel={`${team}, ${formatPoints(pending)} na rodada`}
+              style={[
+                styles.teamChip,
+                {
+                  backgroundColor: colors.background,
+                  borderColor: isSelected ? colors.accent : "transparent",
+                },
+                disabled && !isSelected && styles.disabled,
+              ]}
+            >
+              <TeamBadge
+                teamIndex={teamIndex}
+                teamStyle={teamStyles[team]}
+                size={28}
+              />
+              <Text
+                numberOfLines={1}
+                style={[styles.teamChipName, { color: colors.text }]}
+              >
+                {team}
+              </Text>
+              <View
+                style={[
+                  styles.pendingPill,
+                  {
+                    backgroundColor:
+                      pending !== 0 ? colors.accent : colors.surface,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.pendingText,
+                    {
+                      color: pending !== 0 ? "#fff" : colors.textTertiary,
+                    },
+                  ]}
+                >
+                  +{pending}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+
+      <View style={styles.pointsGrid}>
+        <View style={styles.pointsRow}>
+          {QUICK_POINTS_TOP.map(renderQuickTile)}
+        </View>
+        <View style={styles.pointsRow}>
+          {QUICK_POINTS_BOTTOM.map(renderQuickTile)}
+          <View
+            style={[
+              styles.pointTile,
+              styles.customTile,
+              {
+                backgroundColor: isCustomHighlighted
+                  ? colors.accent
+                  : colors.background,
+                borderColor: colors.accent,
+              },
+              disabled && !isCustomHighlighted && styles.disabled,
+            ]}
+          >
+            <TouchableOpacity
+              hitSlop={8}
+              disabled={disabled || customPoints <= 1}
+              onPress={() => changeCustomPoints(-1)}
+              accessibilityLabel="Diminuir valor personalizado"
+              style={customPoints <= 1 && styles.disabled}
+            >
+              <Ionicons name="remove" size={18} color={colors.textSecondary} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              activeOpacity={0.7}
+              disabled={!canAdd}
+              onPress={handleCustomAdd}
+              onLongPress={() => setCustomPoints(DEFAULT_CUSTOM_POINTS)}
+              accessibilityLabel={`Somar ${formatPoints(customPoints)}`}
+              accessibilityHint="Segure para voltar ao valor padrão"
+              style={styles.customValue}
+            >
+              <Text
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.5}
+                style={[
+                  styles.pointTileText,
+                  { color: isCustomHighlighted ? "#fff" : colors.accent },
+                ]}
+              >
+                +{isCustomHighlighted ? highlightedPoints : customPoints}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              hitSlop={8}
+              disabled={disabled}
+              onPress={() => changeCustomPoints(1)}
+              accessibilityLabel="Aumentar valor personalizado"
+            >
+              <Ionicons name="add" size={18} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </>
+  );
+}
+
 interface RoundTrackerProps {
   colors: ThemeColors;
   roundIds: string[];
@@ -78,13 +283,11 @@ function RoundTracker({ colors, roundIds }: RoundTrackerProps) {
     roundPoints,
     scoreColumns,
     setCurrentRoundId,
-    teamStyles,
     undoRoundPoints,
   } = useApp();
   const [targetTeam, setTargetTeam] = useState<string | null>(
     lastPlayedTeam ?? scoreColumns[0] ?? null,
   );
-  const [customPoints, setCustomPoints] = useState(DEFAULT_CUSTOM_POINTS);
   const [lastAdded, setLastAdded] = useState<string | null>(null);
 
   // Ao fim de cada partida, o alvo passa a ser o time que acabou de jogar
@@ -211,125 +414,12 @@ function RoundTracker({ colors, roundIds }: RoundTrackerProps) {
         </View>
       ) : (
         <>
-          <Text style={[styles.trackerLabel, { color: colors.textSecondary }]}>
-            Pontos da partida para
-          </Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.chipsRow}
-          >
-            {scoreColumns.map((team, teamIndex) => {
-              const isSelected = team === selectedTeam;
-              const pending = roundPoints[team] ?? 0;
-              return (
-                <TouchableOpacity
-                  key={team}
-                  activeOpacity={0.8}
-                  onPress={() => setTargetTeam(team)}
-                  accessibilityRole="radio"
-                  accessibilityState={{ checked: isSelected }}
-                  accessibilityLabel={`${team}, ${formatPoints(pending)} na rodada`}
-                  style={[
-                    styles.teamChip,
-                    {
-                      backgroundColor: colors.background,
-                      borderColor: isSelected ? colors.accent : "transparent",
-                    },
-                  ]}
-                >
-                  <TeamBadge
-                    teamIndex={teamIndex}
-                    teamStyle={teamStyles[team]}
-                    size={28}
-                  />
-                  <Text
-                    numberOfLines={1}
-                    style={[styles.teamChipName, { color: colors.text }]}
-                  >
-                    {team}
-                  </Text>
-                  <View
-                    style={[
-                      styles.pendingPill,
-                      {
-                        backgroundColor:
-                          pending !== 0 ? colors.accent : colors.surface,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.pendingText,
-                        {
-                          color: pending !== 0 ? "#fff" : colors.textTertiary,
-                        },
-                      ]}
-                    >
-                      +{pending}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-
-          <View style={styles.pointsGrid}>
-            {QUICK_POINTS.map((points) => (
-              <TouchableOpacity
-                key={points}
-                activeOpacity={0.7}
-                disabled={!selectedTeam}
-                onPress={() => handleAdd(points)}
-                accessibilityLabel={`Somar ${formatPoints(points)}`}
-                style={[
-                  styles.pointTile,
-                  { backgroundColor: colors.background },
-                ]}
-              >
-                <Text style={[styles.pointTileText, { color: colors.text }]}>
-                  +{points}
-                </Text>
-              </TouchableOpacity>
-            ))}
-            <View
-              style={[
-                styles.pointTile,
-                styles.customTile,
-                { backgroundColor: colors.background, borderColor: colors.accent },
-              ]}
-            >
-              <TouchableOpacity
-                hitSlop={8}
-                disabled={customPoints <= 1}
-                onPress={() => setCustomPoints((value) => Math.max(1, value - 1))}
-                accessibilityLabel="Diminuir valor personalizado"
-                style={customPoints <= 1 && styles.disabled}
-              >
-                <Ionicons name="remove" size={18} color={colors.textSecondary} />
-              </TouchableOpacity>
-              <TouchableOpacity
-                activeOpacity={0.7}
-                disabled={!selectedTeam}
-                onPress={() => handleAdd(customPoints)}
-                onLongPress={() => setCustomPoints(DEFAULT_CUSTOM_POINTS)}
-                accessibilityLabel={`Somar ${formatPoints(customPoints)}`}
-                accessibilityHint="Segure para voltar ao valor padrão"
-                style={styles.customValue}
-              >
-                <Text style={[styles.pointTileText, { color: colors.accent }]}>
-                  +{customPoints}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                hitSlop={8}
-                onPress={() => setCustomPoints((value) => value + 1)}
-                accessibilityLabel="Aumentar valor personalizado"
-              >
-                <Ionicons name="add" size={18} color={colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
-          </View>
+          <MatchPointsPicker
+            colors={colors}
+            selectedTeam={selectedTeam}
+            onSelectTeam={setTargetTeam}
+            onAdd={handleAdd}
+          />
 
           <View style={styles.feedbackRow}>
             <Text
@@ -612,7 +702,7 @@ export function ScoresPanel({ compact = false }: ScoresPanelProps) {
               Abrir ao fim de cada partida
             </Text>
             <Text style={[styles.autoOpenHint, { color: colors.textTertiary }]}>
-              Mostra esta tela quando o timer termina, para pontuar na hora.
+              Mostra os pontos da partida num card na tela inicial quando o timer termina.
             </Text>
           </View>
           <Switch
@@ -806,26 +896,34 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
   pointsGrid: {
+    gap: 8,
+  },
+  pointsRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
     gap: 8,
   },
   pointTile: {
-    flexGrow: 1,
-    flexBasis: "30%",
     height: 64,
     borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
   },
+  // Os quatro botões rápidos de cada linha têm a mesma largura
+  quickTile: {
+    flexGrow: 1,
+    flexBasis: 0,
+  },
   pointTileText: {
     fontFamily: "AlfaSlabOne",
     fontSize: 24,
   },
+  // Ocupa as duas colunas restantes (e o espaço entre elas)
   customTile: {
+    flexGrow: 2,
+    flexBasis: 8,
     flexDirection: "row",
     justifyContent: "space-between",
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     borderWidth: 1.5,
   },
   customValue: {

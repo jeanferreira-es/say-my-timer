@@ -8,8 +8,8 @@ import {
   Octicons
 } from "@expo/vector-icons";
 import {
-  createAudioPlayer,
   setAudioModeAsync,
+  useAudioPlayer,
   type AudioPlayer,
 } from "expo-audio";
 import { useRouter } from "expo-router";
@@ -47,6 +47,7 @@ import Animated, {
 } from "react-native-reanimated";
 import Svg, { G, Path } from "react-native-svg";
 
+import { MatchPointsModal } from "@/components/MatchPointsModal";
 import { ScoresPanel } from "@/components/ScoresPanel";
 import {
   INITIAL_TURN,
@@ -310,25 +311,31 @@ const TimerCircle = forwardRef<TimerCircleRef, TimerCircleProps>(
     },
     ref,
   ) {
+    const totalMs = seconds * 1000;
     const [remaining, setRemaining] = useState<number>(seconds);
     const [running, setRunning] = useState<boolean>(false);
 
     const widthScale = useSharedValue(1);
     const borderProgress = useSharedValue(0);
-    const prevRunningRef = useRef(false);
     const lastPauseTapRef = useRef(0);
     const rewindUntilRef = useRef(0);
-
+    // O tempo é medido pelo relógio, não por ticks: endAt é quando o timer
+    // zera, e remainingMs guarda o que sobra enquanto está pausado. Assim o
+    // número, o anel e o fim (som) ficam sincronizados e sem atraso acumulado.
+    const endAtRef = useRef<number | null>(null);
+    const remainingMsRef = useRef(totalMs);
+    const tickRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const onCompleteRef = useRef(onComplete);
     useEffect(() => {
-      const justStarted = running && !prevRunningRef.current;
-      prevRunningRef.current = running;
-      if (!justStarted) return;
-      const durationMs = remaining * 1000;
-      borderProgress.value = withTiming(1, {
-        duration: durationMs,
-        easing: Easing.linear,
-      });
-    }, [running, remaining, borderProgress]);
+      onCompleteRef.current = onComplete;
+    }, [onComplete]);
+
+    const clearTick = useCallback(() => {
+      if (tickRef.current) clearTimeout(tickRef.current);
+      tickRef.current = null;
+    }, []);
+
+    useEffect(() => clearTick, [clearTick]);
 
     useEffect(() => {
       const targetScale = expanded && running ? 2 : 1;
@@ -339,33 +346,48 @@ const TimerCircle = forwardRef<TimerCircleRef, TimerCircleProps>(
     }, [expanded, running, widthScale]);
 
     useEffect(() => {
+      clearTick();
+      endAtRef.current = null;
+      remainingMsRef.current = seconds * 1000;
       setRemaining(seconds);
       setRunning(false);
       borderProgress.value = 0;
       widthScale.value = 1;
-    }, [seconds, borderProgress, widthScale]);
+    }, [seconds, borderProgress, widthScale, clearTick]);
 
-    const reset = useCallback(() => {
+    // Para a contagem e volta ao tempo inicial, sem avisar o fim
+    const stopAndRestore = useCallback(() => {
+      clearTick();
       cancelAnimation(borderProgress);
+      endAtRef.current = null;
+      remainingMsRef.current = totalMs;
       setRemaining(seconds);
       setRunning(false);
       onRunningChange?.(timerId, false);
+    }, [
+      borderProgress,
+      clearTick,
+      onRunningChange,
+      seconds,
+      timerId,
+      totalMs,
+    ]);
+
+    const reset = useCallback(() => {
+      stopAndRestore();
       widthScale.value = withTiming(1, {
         duration: DURATION_MS,
         easing: Easing.out(Easing.cubic),
       });
       borderProgress.value = withTiming(0, { duration: 300 });
-    }, [seconds, onRunningChange, timerId, widthScale, borderProgress]);
+    }, [stopAndRestore, widthScale, borderProgress]);
 
     // Finaliza o timer: zera o estado e retrocede o anel até o início
     const finish = useCallback(() => {
-      cancelAnimation(borderProgress);
       cancelAnimation(widthScale);
       lastPauseTapRef.current = 0;
       rewindUntilRef.current = Date.now() + REWIND_MS;
-      setRemaining(seconds);
-      setRunning(false);
-      onRunningChange?.(timerId, false);
+      stopAndRestore();
       widthScale.value = withTiming(1, {
         duration: DURATION_MS,
         easing: Easing.out(Easing.cubic),
@@ -374,39 +396,79 @@ const TimerCircle = forwardRef<TimerCircleRef, TimerCircleProps>(
         duration: REWIND_MS,
         easing: Easing.out(Easing.cubic),
       });
-    }, [seconds, onRunningChange, timerId, widthScale, borderProgress]);
+    }, [stopAndRestore, widthScale, borderProgress]);
 
-    useEffect(() => {
-      if (!running) return;
-      if (remaining <= 0) {
-        if (resetOnComplete) finish();
-        else setRunning(false);
-        onComplete?.();
-        return;
+    const complete = useCallback(() => {
+      clearTick();
+      endAtRef.current = null;
+      if (resetOnComplete) {
+        finish();
+      } else {
+        remainingMsRef.current = 0;
+        setRemaining(0);
+        setRunning(false);
       }
-      const t = setInterval(() => setRemaining((r) => r - 1), 1000);
-      return () => clearInterval(t);
-    }, [running, remaining, onComplete, resetOnComplete, finish]);
+      onCompleteRef.current?.();
+    }, [clearTick, finish, resetOnComplete]);
 
-    const pause = useCallback(() => {
+    // Atualiza o número a cada virada de segundo e dispara o fim exatamente
+    // quando o tempo acaba
+    const tick = useCallback(() => {
+      const step = () => {
+        const endAt = endAtRef.current;
+        if (endAt === null) return;
+        const msLeft = endAt - Date.now();
+        if (msLeft <= 0) {
+          complete();
+          return;
+        }
+        setRemaining(Math.ceil(msLeft / 1000));
+        tickRef.current = setTimeout(step, msLeft % 1000 || 1000);
+      };
+      step();
+    }, [complete]);
+
+    const run = useCallback(() => {
+      const msLeft = remainingMsRef.current;
+      if (msLeft <= 0) return false;
+      clearTick();
+      endAtRef.current = Date.now() + msLeft;
+      // O anel parte de onde o tempo está e termina junto com ele
+      borderProgress.value = 1 - msLeft / totalMs;
+      borderProgress.value = withTiming(1, {
+        duration: msLeft,
+        easing: Easing.linear,
+      });
+      setRunning(true);
+      tick();
+      return true;
+    }, [borderProgress, clearTick, tick, totalMs]);
+
+    const halt = useCallback(() => {
+      if (endAtRef.current !== null) {
+        remainingMsRef.current = Math.max(0, endAtRef.current - Date.now());
+        endAtRef.current = null;
+      }
+      clearTick();
       cancelAnimation(borderProgress);
       setRunning(false);
+    }, [borderProgress, clearTick]);
+
+    const pause = useCallback(() => {
+      halt();
       onRunningChange?.(timerId, false);
-    }, [onRunningChange, timerId, borderProgress]);
+    }, [halt, onRunningChange, timerId]);
 
     useImperativeHandle(
       ref,
       () => ({
         start() {
-          if (remaining > 0) {
-            setRunning(true);
-            onRunningChange?.(timerId, true);
-          }
+          if (run()) onRunningChange?.(timerId, true);
         },
         reset,
         pause,
       }),
-      [remaining, onRunningChange, timerId, reset, pause],
+      [run, onRunningChange, timerId, reset, pause],
     );
 
     const toggle = () => {
@@ -423,17 +485,12 @@ const TimerCircle = forwardRef<TimerCircleRef, TimerCircleProps>(
         onDoubleTap();
         return;
       }
-      lastPauseTapRef.current = onDoubleTap && running ? now : 0;
+      const isRunning = endAtRef.current !== null;
+      lastPauseTapRef.current = onDoubleTap && isRunning ? now : 0;
       onPressAction?.();
-      if (remaining <= 0) reset();
-      else {
-        setRunning((r) => {
-          const next = !r;
-          if (r && !next) cancelAnimation(borderProgress);
-          onRunningChange?.(timerId, next);
-          return next;
-        });
-      }
+      if (remainingMsRef.current <= 0) reset();
+      else if (isRunning) pause();
+      else if (run()) onRunningChange?.(timerId, true);
     };
 
     const { width, height } = useWindowDimensions();
@@ -666,13 +723,47 @@ export default function HomeScreen() {
   const isTablet = Math.min(width, height) >= TABLET_MIN_SIDE;
   const [expandedTimer, setExpandedTimer] = useState<TimerId | null>(null);
   const [settledTimer, setSettledTimer] = useState<TimerId | null>(null);
-  const [isAlarmPlaying, setIsAlarmPlaying] = useState<boolean>(false);
   const [turn, setTurn] = useState<Turn>(INITIAL_TURN);
   const [isRestartOrderConfirmOpen, setIsRestartOrderConfirmOpen] =
     useState(false);
+  // Celular: partida recém-terminada aguardando pontuação no modal. O id faz
+  // cada partida abrir um modal novo, com o lançamento destravado.
+  const [pendingMatch, setPendingMatch] = useState<{
+    id: number;
+    team: string;
+    player: string | null;
+  } | null>(null);
   const timer30Ref = useRef<TimerCircleRef>(null);
   const timer15Ref = useRef<TimerCircleRef>(null);
-  const alarmSoundRef = useRef<AudioPlayer | null>(null);
+  // Sons carregados uma vez só, para tocarem na hora em que são disparados
+  const alarmPlayer = useAudioPlayer(
+    ALARM_SOUNDS[selectedAlarmId] ?? ALARM_SOUNDS.alarm2,
+  );
+  const startPlayer = useAudioPlayer(START_SOUND);
+
+  useEffect(() => {
+    setAudioModeAsync({
+      playsInSilentMode: true,
+      interruptionMode: "duckOthers",
+      shouldPlayInBackground: false,
+    }).catch(() => {});
+  }, []);
+
+  // Ao terminar, pausa e volta ao início, pronto para o próximo disparo. O
+  // pause é obrigatório: no Android o player segue "tocando" depois do fim, e
+  // o seek sozinho faria o som recomeçar (o alarme ficava em loop).
+  useEffect(() => {
+    const players = [alarmPlayer, startPlayer];
+    const subscriptions = players.map((player) => {
+      player.loop = false;
+      return player.addListener("playbackStatusUpdate", (status) => {
+        if (!status.didJustFinish) return;
+        player.pause();
+        void player.seekTo(0).catch(() => {});
+      });
+    });
+    return () => subscriptions.forEach((subscription) => subscription.remove());
+  }, [alarmPlayer, startPlayer]);
 
   const currentTurn = useMemo(
     () => getTurnPlayer(turn, scoreColumns, participantsByTeam),
@@ -690,8 +781,10 @@ export default function HomeScreen() {
   const teamsRef = useRef({ scoreColumns, participantsByTeam });
   teamsRef.current = { scoreColumns, participantsByTeam };
   const currentTeamRef = useRef<string | null>(null);
+  const currentPlayerRef = useRef<string | null>(null);
   useEffect(() => {
     currentTeamRef.current = currentTurn?.team ?? null;
+    currentPlayerRef.current = currentTurn?.player ?? null;
   }, [currentTurn]);
   const advanceTurn = useCallback(() => {
     // A pontuação da partida vai, por padrão, para quem acabou de jogar
@@ -699,11 +792,15 @@ export default function HomeScreen() {
     setLastPlayedTeam(playedTeam);
     const { scoreColumns: order, participantsByTeam: players } = teamsRef.current;
     setTurn((current) => nextTurn(current, order, players));
-    // No tablet a pontuação já aparece ao lado; no celular, abre se pedido
+    // No tablet a pontuação já aparece ao lado; no celular, abre o modal se pedido
     if (playedTeam && !isTablet && openScoresAfterTurn) {
-      router.push("/score");
+      setPendingMatch({
+        id: Date.now(),
+        team: playedTeam,
+        player: currentPlayerRef.current,
+      });
     }
-  }, [isTablet, openScoresAfterTurn, router, setLastPlayedTeam]);
+  }, [isTablet, openScoresAfterTurn, setLastPlayedTeam]);
 
   // No tablet, a pontuação fica ao lado: some assim que um timer roda e só
   // volta quando nenhum timer ficou rodando durante o atraso
@@ -732,23 +829,15 @@ export default function HomeScreen() {
     setTurn((current) => previousTurn(current, order, players));
   }, []);
 
-  const stopAlarm = useCallback(async () => {
+  const stopAlarm = useCallback(() => {
     try {
-      const sound = alarmSoundRef.current;
-      if (sound) {
-        sound.pause();
-        await sound.seekTo(0);
-        sound.removeAllListeners("playbackStatusUpdate");
-        sound.remove();
-        alarmSoundRef.current = null;
-      }
-      setIsAlarmPlaying(false);
+      alarmPlayer.pause();
+      void alarmPlayer.seekTo(0).catch(() => {});
     } catch (e) {
       const err = e as { message?: string };
       console.warn("Erro ao parar alarme:", err?.message ?? e);
-      setIsAlarmPlaying(false);
     }
-  }, []);
+  }, [alarmPlayer]);
 
   // Volta a vez para o primeiro jogador do primeiro time, seguindo a ordem da tela de times
   const handleRestartOrder = useCallback(() => {
@@ -757,59 +846,34 @@ export default function HomeScreen() {
     setTurn(INITIAL_TURN);
     timer30Ref.current?.reset();
     timer15Ref.current?.reset();
-    void stopAlarm();
+    stopAlarm();
   }, [stopAlarm]);
 
-  const playAlarm = useCallback(async () => {
-    const source = ALARM_SOUNDS[selectedAlarmId] ?? ALARM_SOUNDS.alarm2;
+  const playSound = useCallback(async (player: AudioPlayer, label: string) => {
     try {
-      await stopAlarm();
-      await setAudioModeAsync({
-        playsInSilentMode: true,
-        interruptionMode: "duckOthers",
-        shouldPlayInBackground: false,
-      });
-      const sound = createAudioPlayer(source);
-      alarmSoundRef.current = sound;
-      setIsAlarmPlaying(true);
-      sound.addListener("playbackStatusUpdate", (status) => {
-        if (status.isLoaded && status.didJustFinish && !status.loop) {
-          sound.removeAllListeners("playbackStatusUpdate");
-          sound.remove();
-          alarmSoundRef.current = null;
-          setIsAlarmPlaying(false);
-        }
-      });
-      sound.play();
+      // Normalmente já está parado no início; se ainda estiver tocando ou
+      // parado no meio, para e volta antes, para tocar uma única vez do começo
+      if (player.playing || player.currentTime > 0) {
+        player.pause();
+        await player.seekTo(0);
+      }
+      player.play();
     } catch (e) {
       const err = e as { message?: string };
-      console.warn("Erro ao tocar alarme:", err?.message ?? e);
-      Vibration.vibrate(ALARM_VIBRATION_PATTERN);
-      setIsAlarmPlaying(false);
+      console.warn(`Erro ao tocar ${label}:`, err?.message ?? e);
+      return false;
     }
-  }, [stopAlarm, selectedAlarmId]);
-
-  const playStartSound = useCallback(async () => {
-    try {
-      await setAudioModeAsync({
-        playsInSilentMode: true,
-        interruptionMode: "duckOthers",
-        shouldPlayInBackground: false,
-      });
-      const sound = createAudioPlayer(START_SOUND);
-      let subscription: { remove(): void } | null = null;
-      subscription = sound.addListener("playbackStatusUpdate", (status) => {
-        if (status.isLoaded && status.didJustFinish && !status.loop) {
-          subscription?.remove();
-          sound.remove();
-        }
-      });
-      sound.play();
-    } catch (e) {
-      const err = e as { message?: string };
-      console.warn("Erro ao tocar start:", err?.message ?? e);
-    }
+    return true;
   }, []);
+
+  const playAlarm = useCallback(async () => {
+    const played = await playSound(alarmPlayer, "alarme");
+    if (!played) Vibration.vibrate(ALARM_VIBRATION_PATTERN);
+  }, [alarmPlayer, playSound]);
+
+  const playStartSound = useCallback(() => {
+    void playSound(startPlayer, "start");
+  }, [playSound, startPlayer]);
 
   const handleRunningChange = useCallback(
     (timerId: TimerId, isRunning: boolean) => {
@@ -982,7 +1046,7 @@ export default function HomeScreen() {
             resetOnComplete
             onPressAction={() => {
               timer15Ref.current?.reset();
-              void stopAlarm();
+              stopAlarm();
             }}
             onDoubleTap={handleFinishTurn}
             colors={colors}
@@ -1038,6 +1102,14 @@ export default function HomeScreen() {
           onCancel={() => setIsRestartOrderConfirmOpen(false)}
           colors={colors}
         />
+        {pendingMatch && !isTablet ? (
+          <MatchPointsModal
+            key={pendingMatch.id}
+            playedTeam={pendingMatch.team}
+            playedPlayer={pendingMatch.player}
+            onClose={() => setPendingMatch(null)}
+          />
+        ) : null}
       </Animated.View>
       {showScoresPanel ? (
         <Animated.View
